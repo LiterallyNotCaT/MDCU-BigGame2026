@@ -7,8 +7,12 @@
 const SHEET_ID = '1FKv1l9zpF85V_oUKQCjAjYyb4DZcMRCvN671DzU_Dq4'
 const STATE_SHEET = 'GAME_STATE'
 const CHAT_GID = 398958693
+const REPORT_CHAT_GID = 1090774629
 const PASSWORD_GID = 1524637408
 const FORM_CONFIG_RANGE = 'E3:H33'
+const FORM_CONFIG_PUBLIC_CACHE_SECONDS = 60
+const FORM_CONFIG_PRIVATE_CACHE_SECONDS = 20
+const FORM_STATE_CACHE_SECONDS = 8
 const FORM_SPREADSHEETS_BY_TAB = {
   'เช้าบน': '10Z4J30FlnX_iXgGsJfc-v-USho2mSDtKT_9uFLcDEnk',
   'เช้าล่าง': '1SwwS8hxhZmAwuMF_WZn8QweKmDY-fv5dJg_gMFA1zfs',
@@ -89,6 +93,7 @@ function handleWriteChat(payload) {
   const actor = normalizeChatActor_(rawActor)
   const message = String(payload.message || '').trim()
   const replyToId = normalizeChatReplyId_(payload.replyToId)
+  const topic = normalizeChatTopic_(payload.topic)
   let sendTo = normalizeChatRecipient_(payload.sendTo)
   if (!actor) return { status: 'error', message: 'Invalid chat actor' }
   if (!message) return { status: 'error', message: 'Message is blank' }
@@ -97,12 +102,13 @@ function handleWriteChat(payload) {
   const lock = LockService.getScriptLock()
   let locked = false
   try {
-    lock.waitLock(15000)
+    lock.waitLock(30000)
     locked = true
 
     const ss = SpreadsheetApp.openById(SHEET_ID)
-    const sheet = getSheetByGid_(ss, CHAT_GID)
-    if (!sheet) return { status: 'error', message: `Chat sheet gid ${CHAT_GID} not found` }
+    const chatGid = topic === 'report' ? REPORT_CHAT_GID : CHAT_GID
+    const sheet = getSheetByGid_(ss, chatGid)
+    if (!sheet) return { status: 'error', message: `Chat sheet gid ${chatGid} not found` }
 
     const targetRow = Math.max(sheet.getLastRow() + 1, 2)
     const lockedReplyTarget = getPrivateReplyTarget_(sheet, replyToId, actor)
@@ -115,7 +121,7 @@ function handleWriteChat(payload) {
     const timeZone = Session.getScriptTimeZone()
     const dateText = Utilities.formatDate(now, timeZone, 'M/d/yyyy')
     const timeText = Utilities.formatDate(now, timeZone, 'HH:mm')
-    sheet.getRange(targetRow, 1, 1, 8).setValues([[
+    sheet.getRange(targetRow, 1, 1, 7).setValues([[
       chatId,
       dateText,
       timeText,
@@ -123,7 +129,6 @@ function handleWriteChat(payload) {
       message.slice(0, 500),
       sendTo,
       replyToId,
-      normalizeChatTopic_(payload.topic),
     ]])
     SpreadsheetApp.flush()
     return { status: 'ok', row: targetRow, id: chatId }
@@ -139,6 +144,7 @@ function normalizeChatActor_(actor) {
   if (raw.toLowerCase() === 'admin') return 'Admin'
   const baan = Number(raw)
   if (baan >= 1 && baan <= 12) return baan
+  if (/^staff\s+/i.test(raw)) return raw.slice(0, 80)
   return ''
 }
 
@@ -149,6 +155,7 @@ function normalizeChatRecipient_(recipient) {
   if (lower === 'admin') return 'admin'
   const baan = Number(raw)
   if (baan >= 1 && baan <= 12) return baan
+  if (/^staff\s+/i.test(raw)) return raw.slice(0, 80)
   return 'public'
 }
 
@@ -206,6 +213,51 @@ function makeFormKey_(tab, user, gid) {
   return `${tab}|${user}|${gid}`
 }
 
+function cacheGetJson_(key) {
+  try {
+    const raw = CacheService.getScriptCache().get(key)
+    return raw ? JSON.parse(raw) : null
+  } catch (err) {
+    return null
+  }
+}
+
+function cachePutJson_(key, value, seconds) {
+  try {
+    CacheService.getScriptCache().put(key, JSON.stringify(value), seconds)
+  } catch (err) {
+    // Cache is best-effort. Never block game/form writes because cache failed.
+  }
+}
+
+function cacheRemove_(key) {
+  try {
+    CacheService.getScriptCache().remove(key)
+  } catch (err) {
+    // Cache is best-effort.
+  }
+}
+
+function cacheKeyPart_(value) {
+  return Utilities.base64EncodeWebSafe(String(value)).replace(/=+$/g, '').slice(0, 180)
+}
+
+function formConfigCacheKey_(includePasswords) {
+  return `FORM_CONFIG_V5_${includePasswords ? 'private' : 'public'}`
+}
+
+function formAdminPasswordCacheKey_() {
+  return 'FORM_ADMIN_PASSWORD_V2'
+}
+
+function formStateCacheKey_(form) {
+  return `FORM_STATE_V4_${cacheKeyPart_(form.formKey)}`
+}
+
+function invalidateFormState_(form) {
+  cacheRemove_(formStateCacheKey_(form))
+}
+
 function inferFormMeta_(tab, user) {
   const normalized = String(user || '').toLowerCase().replace(/\s+/g, ' ').trim()
   if (['event', 'snake ladder', 'money drop'].indexOf(normalized) >= 0) {
@@ -226,6 +278,10 @@ function getPasswordSheet_() {
 }
 
 function readFormConfigs_(includePasswords) {
+  const cacheKey = formConfigCacheKey_(includePasswords)
+  const cached = cacheGetJson_(cacheKey)
+  if (Array.isArray(cached)) return cached
+
   const sheet = getPasswordSheet_()
   if (!sheet) throw new Error(`Password/config sheet gid ${PASSWORD_GID} not found`)
 
@@ -261,6 +317,11 @@ function readFormConfigs_(includePasswords) {
     if (includePasswords) form.password = password
     forms.push(form)
   })
+  cachePutJson_(
+    cacheKey,
+    forms,
+    includePasswords ? FORM_CONFIG_PRIVATE_CACHE_SECONDS : FORM_CONFIG_PUBLIC_CACHE_SECONDS
+  )
   return forms
 }
 
@@ -270,13 +331,21 @@ function findFormConfig_(formKey, includePassword) {
 }
 
 function getAdminPassword_() {
+  const cached = cacheGetJson_(formAdminPasswordCacheKey_())
+  if (cached && typeof cached.password === 'string') return cached.password
+
   const sheet = getPasswordSheet_()
   if (!sheet) return ''
   const formAdminPassword = String(sheet.getRange('G33').getDisplayValue() || '').trim()
-  if (formAdminPassword) return formAdminPassword
+  if (formAdminPassword) {
+    cachePutJson_(formAdminPasswordCacheKey_(), { password: formAdminPassword }, FORM_CONFIG_PRIVATE_CACHE_SECONDS)
+    return formAdminPassword
+  }
 
   const rows = sheet.getRange('A1:B25').getDisplayValues()
-  return String(rows[4] && rows[4][1] || '').trim()
+  const password = String(rows[4] && rows[4][1] || '').trim()
+  cachePutJson_(formAdminPasswordCacheKey_(), { password }, FORM_CONFIG_PRIVATE_CACHE_SECONDS)
+  return password
 }
 
 function handleReadFormConfig() {
@@ -374,8 +443,7 @@ function remainderText_(participantsText, manualValues) {
   return formatHouseList_(base.filter(house => !used[house]))
 }
 
-function readFormState_(form) {
-  const sheet = openFormSheet_(form)
+function readFormStateFromSheet_(form, sheet) {
   const lastCol = Math.min(Math.max(sheet.getLastColumn(), 2), 26)
   const rows = sheet.getRange(1, 1, 17, lastCol).getDisplayValues()
   const control = readFormControl_(form.formKey)
@@ -436,6 +504,17 @@ function readFormState_(form) {
   }
 }
 
+function readFormState_(form, skipCache) {
+  if (!skipCache) {
+    const cached = cacheGetJson_(formStateCacheKey_(form))
+    if (cached && cached.form && cached.form.formKey === form.formKey) return cached
+  }
+
+  const state = readFormStateFromSheet_(form, openFormSheet_(form))
+  cachePutJson_(formStateCacheKey_(form), state, FORM_STATE_CACHE_SECONDS)
+  return state
+}
+
 function handleReadFormState(payload) {
   const form = findFormConfig_(payload.formKey, false)
   if (!form) return { status: 'error', message: 'Form not found' }
@@ -448,7 +527,7 @@ function validateFormAuth_(form, payload) {
     if (password && password === getAdminPassword_()) return { ok: true, role: 'admin', username: 'Admin' }
     return { ok: false, message: 'Wrong admin password' }
   }
-  const fullForm = findFormConfig_(form.formKey, true)
+  const fullForm = form && form.password !== undefined ? form : findFormConfig_(form.formKey, true)
   if (fullForm && fullForm.password && password === fullForm.password) return { ok: true, role: 'staff', username: fullForm.user }
   return { ok: false, message: 'Wrong password' }
 }
@@ -486,7 +565,7 @@ function buildFormColumnValues_(form, values, fillToRank, participantsText) {
 }
 
 function handleWriteFormScore(payload) {
-  const form = findFormConfig_(payload.formKey, false)
+  const form = findFormConfig_(payload.formKey, true)
   if (!form) return { status: 'error', message: 'Form not found' }
   const auth = validateFormAuth_(form, payload)
   if (!auth.ok) return { status: 'error', message: auth.message || 'Unauthorized' }
@@ -497,11 +576,11 @@ function handleWriteFormScore(payload) {
   const lock = LockService.getScriptLock()
   let locked = false
   try {
-    lock.waitLock(25000)
+    lock.waitLock(30000)
     locked = true
 
     const sheet = openFormSheet_(form)
-    const state = readFormState_(form)
+    const state = readFormStateFromSheet_(form, sheet)
     if (roundIndex >= state.rounds.length) return { status: 'error', message: 'Round not found' }
     const round = state.rounds[roundIndex]
     const now = new Date()
@@ -538,6 +617,7 @@ function handleWriteFormScore(payload) {
     }
     writeFormControl_(form.formKey, control)
     SpreadsheetApp.flush()
+    invalidateFormState_(form)
     return { status: 'ok', message: `${form.user} ${round.label} saved`, roundIndex }
   } catch (err) {
     const message = String(err && err.message ? err.message : err)
@@ -575,6 +655,7 @@ function handleSetFormRoundControl(payload) {
     if (payload.clearDeadline === true) round.deadlineAt = ''
     control.rounds[String(roundIndex)] = round
     writeFormControl_(form.formKey, control)
+    invalidateFormState_(form)
     return { status: 'ok', message: 'Form control updated' }
   } catch (err) {
     return { status: 'error', message: 'Form control is busy. Please retry.' }
@@ -630,6 +711,10 @@ function cellNumber_(range) {
   return numberFrom_(range.getDisplayValue())
 }
 
+function rowCellNumber_(values, displayValues, col) {
+  return numberFrom_(values[col - 1]) || numberFrom_(displayValues[col - 1])
+}
+
 function handleWriteWave(payload) {
   const { wave, baan, betTarget, betAmount, kingAmount, kingDisaster, islands } = payload
   const waveNumber = numberFrom_(wave)
@@ -665,7 +750,7 @@ function handleWriteWave(payload) {
   const lock = LockService.getScriptLock()
   let locked = false
   try {
-    lock.waitLock(20000)
+    lock.waitLock(30000)
     locked = true
 
   const ss        = SpreadsheetApp.openById(SHEET_ID)
@@ -705,14 +790,17 @@ function handleWriteWave(payload) {
   }
 
   // ── Read current balance to validate ──────────────────
-  const currentBalance = cellNumber_(sheet.getRange(row, COL.BALANCE))
+  const rowRange = sheet.getRange(row, 1, 1, COL.ISLAND3_AMT)
+  const rowValues = rowRange.getValues()[0] || []
+  const rowDisplayValues = rowRange.getDisplayValues()[0] || []
+  const currentBalance = rowCellNumber_(rowValues, rowDisplayValues, COL.BALANCE)
   const minBetAmount = Math.ceil(currentBalance * 0.1)
-  const existingBetSpend = cellNumber_(sheet.getRange(row, COL.BET_AMOUNT))
-  const existingKingSpend = cellNumber_(sheet.getRange(row, COL.KING_AMOUNT))
+  const existingBetSpend = rowCellNumber_(rowValues, rowDisplayValues, COL.BET_AMOUNT)
+  const existingKingSpend = rowCellNumber_(rowValues, rowDisplayValues, COL.KING_AMOUNT)
   const existingIslandSpend =
-    cellNumber_(sheet.getRange(row, COL.ISLAND1_AMT)) +
-    cellNumber_(sheet.getRange(row, COL.ISLAND2_AMT)) +
-    cellNumber_(sheet.getRange(row, COL.ISLAND3_AMT))
+    rowCellNumber_(rowValues, rowDisplayValues, COL.ISLAND1_AMT) +
+    rowCellNumber_(rowValues, rowDisplayValues, COL.ISLAND2_AMT) +
+    rowCellNumber_(rowValues, rowDisplayValues, COL.ISLAND3_AMT)
   const nextBetSpend = hasBetPayload ? (betAmountNumber || 0) : existingBetSpend
   const nextKingSpend = kingAmountNumber !== null ? kingAmountNumber : existingKingSpend
   const nextIslandSpend = hasIslandPayload ? islandSpend : existingIslandSpend

@@ -48,6 +48,11 @@ function clampFillToRank(value: number) {
   return Math.max(1, Math.min(11, Math.floor(value)))
 }
 
+function staffChatName(name: string) {
+  const clean = String(name || '').trim()
+  return clean.toLowerCase().startsWith('staff ') ? clean : `Staff ${clean}`
+}
+
 function validatedColumn(
   state: ScoringFormState,
   draft: string[][],
@@ -128,8 +133,18 @@ export default function FormPage() {
   const grouped = useMemo(() => groupByTab(forms), [forms])
   const currentForms = grouped[tab] ?? []
   const currentForm = forms.find(form => form.formKey === formKey) ?? currentForms[0] ?? null
+  const reportTargets = useMemo(() => {
+    const seen = new Set<string>()
+    return forms.flatMap(form => {
+      const value = staffChatName(form.user)
+      if (seen.has(value)) return []
+      seen.add(value)
+      return [{ value, label: value }]
+    })
+  }, [forms])
   const session = currentForm ? adminSession ?? sessions[currentForm.formKey] ?? null : adminSession
   const canSeeContent = Boolean(currentForm && (adminSession || sessions[currentForm.formKey]))
+  const canLoadSelectedForm = Boolean(formKey && (adminSession || sessions[formKey]))
   const isAdmin = session?.role === 'admin'
   const selectedRoundMeta = state?.rounds[selectedRound] ?? null
   const selectedIsTimedOut = Boolean(selectedRoundMeta?.deadlineAt && Date.now() > new Date(selectedRoundMeta.deadlineAt).getTime())
@@ -182,8 +197,15 @@ export default function FormPage() {
 
   useEffect(() => {
     if (!formKey) return
-    refreshState(formKey)
-  }, [formKey, refreshState])
+    if (canLoadSelectedForm) {
+      refreshState(formKey)
+      return
+    }
+    setState(null)
+    setDraft([])
+    setParticipantsByRound([])
+    setSelectedRound(0)
+  }, [canLoadSelectedForm, formKey, refreshState])
 
   const loginStaff = async () => {
     if (!currentForm || !passwordInput.trim()) return
@@ -193,12 +215,13 @@ export default function FormPage() {
         body: JSON.stringify({ formKey: currentForm.formKey, password: passwordInput }),
       })
       if (!data.ok) throw new Error(data.message || 'Wrong password')
+      const username = staffChatName(data.username)
       setSessions(prev => ({
         ...prev,
-        [currentForm.formKey]: { role: 'staff', username: data.username, password: passwordInput },
+        [currentForm.formKey]: { role: 'staff', username, password: passwordInput },
       }))
       setPasswordInput('')
-      notify('ok', `Logged in as ${data.username}`)
+      notify('ok', `Logged in as ${username}`)
     } catch (error) {
       notify('err', error instanceof Error ? error.message : String(error))
     }
@@ -261,8 +284,25 @@ export default function FormPage() {
           values: validated.values,
         }),
       })
+      setDraft(prev => prev.map((row, rowIndex) => row.map((cell, colIndex) => (
+        colIndex === roundIndex ? validated.values[rowIndex] ?? '' : cell
+      ))))
+      setParticipantsByRound(prev => prev.map((cell, index) => index === roundIndex ? participants : cell))
+      setState(prev => {
+        if (!prev || prev.form.formKey !== state.form.formKey) return prev
+        return {
+          ...prev,
+          fillToRank,
+          values: prev.values.map((row, rowIndex) => row.map((cell, colIndex) => (
+            colIndex === roundIndex ? validated.values[rowIndex] ?? '' : cell
+          ))),
+          rounds: prev.rounds.map((item, index) => index === roundIndex
+            ? { ...item, participants, confirmed: true, locked: false }
+            : item
+          ),
+        }
+      })
       notify('ok', `Saved ${round.label}`)
-      await refreshState(state.form.formKey)
     } catch (error) {
       notify('err', error instanceof Error ? error.message : String(error))
     } finally {
@@ -283,7 +323,24 @@ export default function FormPage() {
           ...patch,
         }),
       })
-      await refreshState(state.form.formKey)
+      setState(prev => {
+        if (!prev || prev.form.formKey !== state.form.formKey) return prev
+        return {
+          ...prev,
+          rounds: prev.rounds.map((round, index) => {
+            if (index !== roundIndex) return round
+            const next = { ...round }
+            if (patch.locked !== undefined) next.locked = patch.locked === true
+            if (patch.confirmed !== undefined) next.confirmed = patch.confirmed === true
+            if (patch.deadlineMinutes !== undefined) {
+              const minutes = Math.max(1, Math.min(240, Number(patch.deadlineMinutes) || 10))
+              next.deadlineAt = new Date(Date.now() + minutes * 60000).toISOString()
+            }
+            if (patch.clearDeadline === true) next.deadlineAt = ''
+            return next
+          }),
+        }
+      })
       notify('ok', 'Round control updated')
     } catch (error) {
       notify('err', error instanceof Error ? error.message : String(error))
@@ -315,7 +372,7 @@ export default function FormPage() {
         </div>
         <div className="form-topbar-actions">
           {session?.role === 'staff' && <GroupChat actor={session.username} label="Report" mode="report" />}
-          {adminSession && <GroupChat actor="admin" label="Report" mode="report" />}
+          {adminSession && <GroupChat actor="admin" label="Report" mode="report" reportTargets={reportTargets} />}
           {adminSession ? (
             <button type="button" className="btn btn-success" onClick={() => setAdminSession(null)}>
               <ShieldCheck size={15} /> Admin

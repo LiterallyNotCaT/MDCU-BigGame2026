@@ -3451,10 +3451,57 @@ form .btn.w-full {
 }
 .group-chat-channel-filter {
   display: flex;
-  justify-content: flex-end;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
   border-bottom: 1px solid #d8e5f4;
   background: rgba(255,255,255,0.78);
   padding: 8px 12px;
+}
+.group-chat-channel-filter .group-chat-target {
+  justify-content: flex-end;
+}
+.group-chat-channel-pills {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+}
+.group-chat-channel-pill {
+  position: relative;
+  flex: 0 0 auto;
+  min-height: 26px;
+  max-width: 150px;
+  border: 1px solid #cbd8ea;
+  border-radius: 999px;
+  background: #fff;
+  padding: 4px 20px 4px 9px;
+  color: #475569;
+  font-size: 0.68rem;
+  font-weight: 900;
+  line-height: 1;
+}
+.group-chat-channel-pill span:first-child {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.group-chat-channel-pill.active {
+  border-color: #2563eb;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+.group-chat-channel-dot {
+  position: absolute;
+  top: 7px;
+  right: 8px;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #ef4444;
+  box-shadow: 0 0 0 2px #fff;
 }
 .group-chat-list {
   flex: 1;
@@ -3767,6 +3814,7 @@ form .btn.w-full {
 }
 .form-shell {
   padding: clamp(12px, 1.6vw, 18px);
+  contain: layout paint;
 }
 .form-tabs,
 .form-subtabs,
@@ -3785,6 +3833,7 @@ form .btn.w-full {
 }
 .form-subtab,
 .form-round-chip {
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -3854,6 +3903,7 @@ form .btn.w-full {
 }
 .form-workspace {
   padding: clamp(12px, 1.6vw, 18px);
+  contain: layout paint;
 }
 .form-table-header {
   display: flex;
@@ -3868,6 +3918,14 @@ form .btn.w-full {
   font-size: clamp(1.35rem, 2.2vw, 2rem);
   font-weight: 1000;
   line-height: 1.05;
+  overflow-wrap: anywhere;
+}
+.form-round-toolbar {
+  position: relative;
+  z-index: 0;
+  clear: both;
+  margin: 12px 0;
+  align-items: center;
 }
 .form-settings-row {
   display: grid;
@@ -3925,6 +3983,9 @@ form .btn.w-full {
 .form-table-wrap {
   width: 100%;
   overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable;
   border: 1px solid #d8e5f4;
   border-radius: 14px;
 }
@@ -3949,15 +4010,7 @@ form .btn.w-full {
   font-weight: 1000;
   white-space: nowrap;
 }
-.form-score-table thead th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-}
 .form-score-table th:first-child {
-  position: sticky;
-  left: 0;
-  z-index: 2;
   min-width: 96px;
 }
 .form-score-table td.active-round,
@@ -4009,6 +4062,24 @@ form .btn.w-full {
   color: #475569;
   font-size: 0.82rem;
   font-weight: 800;
+}
+
+.form-page .btn,
+.form-subtab,
+.form-round-chip,
+.form-confirm-btn {
+  transition-property: background-color, border-color, color, opacity;
+}
+
+@media (max-width: 900px), (pointer: coarse) {
+  .form-shell,
+  .form-workspace {
+    box-shadow: 0 8px 22px rgba(15,23,42,0.06);
+  }
+
+  .form-score-table {
+    min-width: 720px;
+  }
 }
 .form-footer-note {
   color: #94a3b8;

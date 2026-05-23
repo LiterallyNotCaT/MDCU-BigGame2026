@@ -104,6 +104,17 @@ function messageChannelForActor(message: GroupChatMessage, actor: GroupChatActor
   return target
 }
 
+function latestIdsByChannel(messages: GroupChatMessage[], actor: GroupChatActor) {
+  const latest: Record<string, string> = {}
+  messages.forEach(message => {
+    const id = message.id || message.chatId
+    if (!id) return
+    latest.all = id
+    latest[messageChannelForActor(message, actor)] = id
+  })
+  return latest
+}
+
 function canSendToTarget(target: string, actor: GroupChatActor, permissions: ChatPermissions) {
   return target !== actorTarget(actor) && canUseChatTarget(target, actor, permissions)
 }
@@ -158,10 +169,12 @@ export default function GroupChat({
   actor,
   label,
   mode = 'bid',
+  reportTargets = [],
 }: {
   actor: GroupChatActor
   label?: string
   mode?: 'bid' | 'report'
+  reportTargets?: Array<{ value: string; label: string }>
 }) {
   const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState<GroupChatMessage[]>([])
@@ -171,23 +184,37 @@ export default function GroupChat({
   const [replyTo, setReplyTo] = useState<GroupChatMessage | null>(null)
   const [sending, setSending] = useState(false)
   const [unread, setUnread] = useState(false)
+  const [unreadChannels, setUnreadChannels] = useState<Record<string, boolean>>({})
   const [error, setError] = useState('')
   const [chatPermissions, setChatPermissions] = useState(() => normalizeChatPermissions(getGameState().chatPermissions))
-  const seenLatestRef = useRef('')
+  const seenLatestRef = useRef<Record<string, string>>({})
   const initializedRef = useRef(false)
   const listRef = useRef<HTMLDivElement | null>(null)
   const reportStaffOptions = useMemo(() => {
     const seen = new Set<string>()
+    const options = new Map<string, string>()
+    reportTargets.forEach(option => {
+      const value = String(option.value || '').trim()
+      if (!value || value.toLowerCase() === 'admin' || value === 'public') return
+      seen.add(value)
+      options.set(value, option.label || targetLabel(value))
+    })
     messages.forEach(message => {
       if ((message.topic || 'bid') !== 'report') return
       const sender = senderTarget(message)
       const target = message.sendTo || ''
-      if (sender && sender !== 'admin') seen.add(sender)
-      if (target && target !== 'admin' && target !== 'public') seen.add(target)
+      if (sender && sender !== 'admin') {
+        seen.add(sender)
+        if (!options.has(sender)) options.set(sender, targetLabel(sender))
+      }
+      if (target && target !== 'admin' && target !== 'public') {
+        seen.add(target)
+        if (!options.has(target)) options.set(target, targetLabel(target))
+      }
     })
     return Array.from(seen).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
-      .map(value => ({ value, label: targetLabel(value) }))
-  }, [messages])
+      .map(value => ({ value, label: options.get(value) || targetLabel(value) }))
+  }, [messages, reportTargets])
   const channelOptions = useMemo(() => mode === 'report'
     ? isAdminActor(actor)
       ? [{ value: 'all', label: 'All' }, ...reportStaffOptions]
@@ -211,6 +238,12 @@ export default function GroupChat({
   const visibleMessages = useMemo(
     () => viewableMessages.filter(message => channelFilter === 'all' || messageChannelForActor(message, actor) === channelFilter),
     [actor, channelFilter, viewableMessages]
+  )
+  const hasUnreadChannel = useCallback(
+    (channel: string) => channel === 'all'
+      ? Object.values(unreadChannels).some(Boolean)
+      : Boolean(unreadChannels[channel]),
+    [unreadChannels]
   )
   const messageByChatId = useMemo(
     () => new Map(viewableMessages.map(message => [message.chatId, message])),
@@ -247,28 +280,46 @@ export default function GroupChat({
 
   const refresh = useCallback(async () => {
     try {
-      const next = await fetchGroupChatMessages()
+      const next = await fetchGroupChatMessages(mode)
       const viewableNext = next.filter(message => mode === 'report'
         ? canViewReportMessage(message, actor)
         : (message.topic || 'bid') === 'bid' && canViewMessage(message, actor, chatPermissions))
-      const latestId = viewableNext.at(-1)?.id ?? ''
+      const latestByChannel = latestIdsByChannel(viewableNext, actor)
       setMessages(next)
       setError('')
       if (!initializedRef.current) {
         initializedRef.current = true
-        seenLatestRef.current = latestId
+        seenLatestRef.current = latestByChannel
+        setUnread(false)
+        setUnreadChannels({})
         return
       }
-      if (latestId && latestId !== seenLatestRef.current && !open) setUnread(true)
       if (open) {
-        seenLatestRef.current = latestId
+        if (channelFilter === 'all') {
+          seenLatestRef.current = latestByChannel
+        } else if (latestByChannel[channelFilter]) {
+          seenLatestRef.current = {
+            ...seenLatestRef.current,
+            [channelFilter]: latestByChannel[channelFilter],
+          }
+        }
+      }
+
+      const nextUnread: Record<string, boolean> = {}
+      Object.entries(latestByChannel).forEach(([channel, latestId]) => {
+        if (channel === 'all') return
+        nextUnread[channel] = Boolean(latestId && latestId !== seenLatestRef.current[channel])
+      })
+      setUnreadChannels(nextUnread)
+      setUnread(Object.values(nextUnread).some(Boolean))
+      if (open && channelFilter === 'all') {
         setUnread(false)
       }
     } catch (e) {
       console.error(e)
       setError('Cannot load chat')
     }
-  }, [actor, chatPermissions, mode, open])
+  }, [actor, channelFilter, chatPermissions, mode, open])
 
   useEffect(() => {
     refresh()
@@ -280,10 +331,28 @@ export default function GroupChat({
     if (!open) {
       return
     }
-    const latestId = viewableMessages.at(-1)?.id ?? ''
-    seenLatestRef.current = latestId
-    setUnread(false)
-  }, [open, viewableMessages])
+    const latestByChannel = latestIdsByChannel(viewableMessages, actor)
+    if (channelFilter === 'all') {
+      seenLatestRef.current = latestByChannel
+      setUnreadChannels({})
+      setUnread(false)
+      return
+    }
+    if (latestByChannel[channelFilter]) {
+      seenLatestRef.current = {
+        ...seenLatestRef.current,
+        [channelFilter]: latestByChannel[channelFilter],
+      }
+    }
+    setUnreadChannels(prev => {
+      const next = { ...prev, [channelFilter]: false }
+      return next
+    })
+  }, [actor, channelFilter, open, viewableMessages])
+
+  useEffect(() => {
+    setUnread(Object.values(unreadChannels).some(Boolean))
+  }, [unreadChannels])
 
   const beginReply = (message: GroupChatMessage) => {
     setReplyTo(message)
@@ -367,6 +436,19 @@ export default function GroupChat({
                   ))}
                 </select>
               </label>
+              <div className="group-chat-channel-pills" aria-label="Chat channels">
+                {channelOptions.map(option => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setChannelFilter(option.value)}
+                    className={clsx('group-chat-channel-pill', channelFilter === option.value && 'active')}
+                  >
+                    <span>{option.label}</span>
+                    {hasUnreadChannel(option.value) && <span className="group-chat-channel-dot" />}
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div ref={listRef} className="group-chat-list">

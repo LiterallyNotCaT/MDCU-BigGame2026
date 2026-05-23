@@ -13,6 +13,7 @@ export { SHEET_ID } from './constants'
 // See STEP 2 in the setup guide
 const GAS_URL = process.env.NEXT_PUBLIC_GAS_URL ?? ''
 const CHAT_GID = '398958693'
+const REPORT_CHAT_GID = '1090774629'
 
 // ── Column map (1-indexed, for reference) ──────────────────
 // Wave sheet rows 5–16 = บ้าน 1–12
@@ -273,7 +274,7 @@ function normalizeChatTarget(value: string) {
   if (!text || lower === 'public' || lower === 'all') return 'public'
   if (lower === 'admin') return 'admin'
   const baan = parseChatBaan(text)
-  return baan != null ? String(baan) : 'public'
+  return baan != null ? String(baan) : text
 }
 
 function normalizeChatSender(value: string) {
@@ -351,8 +352,10 @@ function normalizeChatTime(value: string) {
   return text
 }
 
-export async function fetchGroupChatMessages(): Promise<GroupChatMessage[]> {
-  const rows = await fetchGidRangeGViz(CHAT_GID, 'A2:H')
+export async function fetchGroupChatMessages(mode: 'bid' | 'report' = 'bid'): Promise<GroupChatMessage[]> {
+  const topic = mode === 'report' ? 'report' : 'bid'
+  const gid = topic === 'report' ? REPORT_CHAT_GID : CHAT_GID
+  const rows = await fetchGidRangeGViz(gid, 'A2:G')
   const messages: GroupChatMessage[] = []
   for (let i = 0; i < rows.length; i++) {
     const colA = cleanChatCell(rows[i]?.[0] ?? '')
@@ -362,7 +365,6 @@ export async function fetchGroupChatMessages(): Promise<GroupChatMessage[]> {
     const colE = cleanChatCell(rows[i]?.[4] ?? '')
     const colF = cleanChatCell(rows[i]?.[5] ?? '')
     const colG = cleanChatCell(rows[i]?.[6] ?? '')
-    const colH = cleanChatCell(rows[i]?.[7] ?? '')
     let chatId = ''
     let dateText = ''
     let timeText = ''
@@ -370,7 +372,6 @@ export async function fetchGroupChatMessages(): Promise<GroupChatMessage[]> {
     let message = ''
     let sendTo = 'public'
     let replyToId = ''
-    let topic = 'bid'
 
     if (/^\d+$/.test(colA) && (colB || colC || colD || colE)) {
       chatId = colA
@@ -380,7 +381,6 @@ export async function fetchGroupChatMessages(): Promise<GroupChatMessage[]> {
       message = colE
       sendTo = normalizeChatTarget(colF)
       replyToId = /^\d+$/.test(colG) ? colG : ''
-      topic = normalizeChatTopic(colH)
     } else if (isChatActorValue(colC)) {
       chatId = String(i + 1)
       dateText = colA
