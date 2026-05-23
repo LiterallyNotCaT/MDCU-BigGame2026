@@ -227,9 +227,10 @@ export interface GroupChatMessage {
   message: string
   sendTo: string
   replyToId: string
+  topic: string
 }
 
-export type GroupChatActor = number | 'admin'
+export type GroupChatActor = number | 'admin' | string
 
 function cleanChatCell(value: unknown) {
   return String(value || '').replace(/\u00a0/g, ' ').trim()
@@ -242,6 +243,11 @@ function parseChatBaan(value: string) {
   return Number.isInteger(baan) && baan >= 1 && baan <= 12
     ? baan
     : null
+}
+
+function isAdminText(value: string) {
+  const lower = cleanChatCell(value).toLowerCase()
+  return lower === 'admin' || lower === 'unknown'
 }
 
 function isChatActorValue(value: string) {
@@ -277,6 +283,12 @@ function normalizeChatSender(value: string) {
   const baan = parseChatBaan(text)
   if (baan != null) return { sender: String(baan), baan }
   return { sender: text, baan: null }
+}
+
+function normalizeChatTopic(value: string) {
+  const text = cleanChatCell(value).toLowerCase()
+  if (text === 'report') return 'report'
+  return 'bid'
 }
 
 function parseSlashDate(text: string) {
@@ -340,7 +352,7 @@ function normalizeChatTime(value: string) {
 }
 
 export async function fetchGroupChatMessages(): Promise<GroupChatMessage[]> {
-  const rows = await fetchGidRangeGViz(CHAT_GID, 'A2:G')
+  const rows = await fetchGidRangeGViz(CHAT_GID, 'A2:H')
   const messages: GroupChatMessage[] = []
   for (let i = 0; i < rows.length; i++) {
     const colA = cleanChatCell(rows[i]?.[0] ?? '')
@@ -350,6 +362,7 @@ export async function fetchGroupChatMessages(): Promise<GroupChatMessage[]> {
     const colE = cleanChatCell(rows[i]?.[4] ?? '')
     const colF = cleanChatCell(rows[i]?.[5] ?? '')
     const colG = cleanChatCell(rows[i]?.[6] ?? '')
+    const colH = cleanChatCell(rows[i]?.[7] ?? '')
     let chatId = ''
     let dateText = ''
     let timeText = ''
@@ -357,6 +370,7 @@ export async function fetchGroupChatMessages(): Promise<GroupChatMessage[]> {
     let message = ''
     let sendTo = 'public'
     let replyToId = ''
+    let topic = 'bid'
 
     if (/^\d+$/.test(colA) && (colB || colC || colD || colE)) {
       chatId = colA
@@ -366,6 +380,7 @@ export async function fetchGroupChatMessages(): Promise<GroupChatMessage[]> {
       message = colE
       sendTo = normalizeChatTarget(colF)
       replyToId = /^\d+$/.test(colG) ? colG : ''
+      topic = normalizeChatTopic(colH)
     } else if (isChatActorValue(colC)) {
       chatId = String(i + 1)
       dateText = colA
@@ -404,6 +419,7 @@ export async function fetchGroupChatMessages(): Promise<GroupChatMessage[]> {
       message,
       sendTo,
       replyToId,
+      topic,
     })
   }
   return messages
@@ -412,10 +428,11 @@ export async function fetchGroupChatMessages(): Promise<GroupChatMessage[]> {
 export async function sendGroupChatMessage(
   actor: GroupChatActor,
   message: string,
-  options: { sendTo?: string; replyToId?: string } = {}
+  options: { sendTo?: string; replyToId?: string; topic?: string } = {}
 ): Promise<{ ok: boolean; message?: string }> {
   if (!GAS_URL) return { ok: false, message: 'GAS URL not configured' }
-  const sheetActor = actor === 'admin' ? 'Admin' : actor
+  const actorText = String(actor)
+  const sheetActor = actorText.toLowerCase() === 'admin' ? 'Admin' : actor
   try {
     await fetch(GAS_URL, {
       method: 'POST',
@@ -428,6 +445,7 @@ export async function sendGroupChatMessage(
         message,
         sendTo: options.sendTo ?? 'public',
         replyToId: options.replyToId ?? '',
+        topic: options.topic ?? 'bid',
       }),
     })
     return { ok: true, message: 'Sent' }

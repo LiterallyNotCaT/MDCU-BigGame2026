@@ -12,18 +12,22 @@ import {
 } from '@/lib/sheets'
 import { getGameState, subscribeStore } from '@/lib/store'
 
+function isAdminActor(actor: GroupChatActor) {
+  return String(actor).trim().toLowerCase() === 'admin'
+}
+
 function isSameActor(message: GroupChatMessage, actor: GroupChatActor) {
-  return actor === 'admin'
+  return isAdminActor(actor)
     ? isAdminSender(message)
-    : message.baan === actor
+    : message.baan === actor || (!message.baan && String(message.sender).trim().toLowerCase() === String(actor).trim().toLowerCase())
 }
 
 function actorTarget(actor: GroupChatActor) {
-  return actor === 'admin' ? 'admin' : String(actor)
+  return isAdminActor(actor) ? 'admin' : String(actor).trim()
 }
 
 function senderTarget(message: GroupChatMessage) {
-  return isAdminSender(message) ? 'admin' : message.baan ? String(message.baan) : ''
+  return isAdminSender(message) ? 'admin' : message.baan ? String(message.baan) : String(message.sender || '').trim()
 }
 
 function targetLabel(target: string) {
@@ -41,10 +45,11 @@ function isHouseTarget(target: string) {
 
 function canUseChatTarget(target: string, actor: GroupChatActor, permissions: ChatPermissions) {
   if (target === 'all') return true
-  if (actor === 'admin') {
+  if (isAdminActor(actor)) {
     if (target === 'public') return permissions.groupChat
     return isHouseTarget(target)
   }
+  if (!isHouseTarget(actorTarget(actor)) && target === 'admin') return true
   if (target === 'public') return permissions.groupChat
   if (target === 'admin') return permissions.adminPrivate
   if (isHouseTarget(target)) return permissions.playerPrivate && target !== actorTarget(actor)
@@ -52,11 +57,11 @@ function canUseChatTarget(target: string, actor: GroupChatActor, permissions: Ch
 }
 
 function canViewMessage(message: GroupChatMessage, actor: GroupChatActor, permissions: ChatPermissions) {
-  if (actor === 'admin') return true
+  if (isAdminActor(actor)) return true
   const target = message.sendTo || 'public'
   if (target === 'public') return permissions.groupChat
   const currentActor = actorTarget(actor)
-  const sender = senderTarget(message)
+  const sender = senderTarget(message) || String(message.sender || '').trim()
   const involved = target === currentActor || sender === currentActor
   if (!involved) return false
   const withAdmin = target === 'admin' || sender === 'admin'
@@ -65,6 +70,13 @@ function canViewMessage(message: GroupChatMessage, actor: GroupChatActor, permis
 
 function chatTargetOptions(actor: GroupChatActor, permissions: ChatPermissions, includeAll = false) {
   const self = actorTarget(actor)
+  const isGenericStaff = !isAdminActor(actor) && !isHouseTarget(self)
+  if (isGenericStaff) {
+    return [
+      ...(includeAll ? [{ value: 'all', label: 'All' }] : []),
+      { value: 'admin', label: 'Admin' },
+    ]
+  }
   const options = [
     ...(includeAll ? [{ value: 'all', label: 'All' }] : []),
     { value: 'public', label: 'Group chat' },
@@ -98,7 +110,7 @@ function canSendToTarget(target: string, actor: GroupChatActor, permissions: Cha
 
 function privateReplyTarget(message: GroupChatMessage, actor: GroupChatActor) {
   const currentActor = actorTarget(actor)
-  const sender = senderTarget(message)
+  const sender = senderTarget(message) || String(message.sender || '').trim()
   const originalTarget = message.sendTo || 'public'
   if (originalTarget === 'public') return ''
   if (sender && sender !== currentActor) return sender
@@ -107,7 +119,9 @@ function privateReplyTarget(message: GroupChatMessage, actor: GroupChatActor) {
 }
 
 function actorLabel(actor: GroupChatActor) {
-  return actor === 'admin' ? 'Admin' : HOUSE_NAMES[actor]
+  if (isAdminActor(actor)) return 'Admin'
+  const baan = Number(actor)
+  return Number.isInteger(baan) && baan >= 1 && baan <= 12 ? HOUSE_NAMES[baan] : String(actor)
 }
 
 function messageSenderName(message: GroupChatMessage) {
@@ -133,12 +147,25 @@ function optimisticChatTime() {
   }
 }
 
-export default function GroupChat({ actor, label }: { actor: GroupChatActor; label?: string }) {
+export default function GroupChat({
+  actor,
+  label,
+  topic = 'bid',
+  topicOptions,
+  adminOnly = false,
+}: {
+  actor: GroupChatActor
+  label?: string
+  topic?: string
+  topicOptions?: string[]
+  adminOnly?: boolean
+}) {
   const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState<GroupChatMessage[]>([])
   const [draft, setDraft] = useState('')
   const [sendTo, setSendTo] = useState('public')
   const [channelFilter, setChannelFilter] = useState('all')
+  const [topicFilter, setTopicFilter] = useState(topicOptions?.[0] ?? topic)
   const [replyTo, setReplyTo] = useState<GroupChatMessage | null>(null)
   const [sending, setSending] = useState(false)
   const [unread, setUnread] = useState(false)
@@ -147,15 +174,29 @@ export default function GroupChat({ actor, label }: { actor: GroupChatActor; lab
   const seenLatestRef = useRef('')
   const initializedRef = useRef(false)
   const listRef = useRef<HTMLDivElement | null>(null)
-  const channelOptions = useMemo(() => chatTargetOptions(actor, chatPermissions, true), [actor, chatPermissions])
-  const sendTargetOptions = useMemo(() => sendOptionsForChannel(actor, channelFilter, chatPermissions), [actor, channelFilter, chatPermissions])
+  const channelOptions = useMemo(() => adminOnly
+    ? [{ value: 'all', label: 'All' }, { value: 'admin', label: 'Admin' }]
+    : chatTargetOptions(actor, chatPermissions, true),
+    [actor, adminOnly, chatPermissions]
+  )
+  const sendTargetOptions = useMemo(() => adminOnly
+    ? [{ value: 'admin', label: 'Admin' }]
+    : sendOptionsForChannel(actor, channelFilter, chatPermissions),
+    [actor, adminOnly, channelFilter, chatPermissions]
+  )
   const viewableMessages = useMemo(
-    () => messages.filter(message => canViewMessage(message, actor, chatPermissions)),
-    [actor, chatPermissions, messages]
+    () => messages.filter(message => adminOnly
+      ? (isAdminActor(actor) ? true : isSameActor(message, actor))
+      : canViewMessage(message, actor, chatPermissions)),
+    [actor, adminOnly, chatPermissions, messages]
   )
   const visibleMessages = useMemo(
-    () => viewableMessages.filter(message => channelFilter === 'all' || messageChannelForActor(message, actor) === channelFilter),
-    [actor, channelFilter, viewableMessages]
+    () => viewableMessages.filter(message => {
+      const messageTopic = message.topic || 'bid'
+      const topicMatches = topicOptions?.length ? topicFilter === 'all' || messageTopic === topicFilter : messageTopic === topic
+      return topicMatches && (channelFilter === 'all' || messageChannelForActor(message, actor) === channelFilter)
+    }),
+    [actor, channelFilter, topic, topicFilter, topicOptions?.length, viewableMessages]
   )
   const messageByChatId = useMemo(
     () => new Map(viewableMessages.map(message => [message.chatId, message])),
@@ -248,6 +289,7 @@ export default function GroupChat({ actor, label }: { actor: GroupChatActor; lab
       setError('This chat channel is disabled by admin')
       return
     }
+    const effectiveTopic = topicOptions?.length ? topicFilter : topic
     setSending(true)
     setDraft('')
     const now = Date.now()
@@ -260,14 +302,15 @@ export default function GroupChat({ actor, label }: { actor: GroupChatActor; lab
       dateKey: time.dateKey,
       dateLabel: time.dateLabel,
       timeLabel: time.timeLabel,
-      sender: actor === 'admin' ? 'Admin' : String(actor),
-      baan: actor === 'admin' ? null : actor,
+      sender: isAdminActor(actor) ? 'Admin' : String(actor),
+      baan: typeof actor === 'number' ? actor : null,
       message,
       chatId: `local-${now}`,
       sendTo: effectiveSendTo,
       replyToId: replyTo?.chatId ?? '',
+      topic: effectiveTopic,
     }])
-    const result = await sendGroupChatMessage(actor, message, { sendTo: effectiveSendTo, replyToId: replyTo?.chatId ?? '' })
+    const result = await sendGroupChatMessage(actor, message, { sendTo: effectiveSendTo, replyToId: replyTo?.chatId ?? '', topic: effectiveTopic })
     if (!result.ok) setError(result.message ?? 'Cannot send message')
     setReplyTo(null)
     window.setTimeout(refresh, 900)
@@ -295,6 +338,16 @@ export default function GroupChat({ actor, label }: { actor: GroupChatActor; lab
               </button>
             </div>
             <div className="group-chat-channel-filter">
+              {topicOptions?.length ? (
+                <label className="group-chat-target">
+                  <span>Topic</span>
+                  <select value={topicFilter} onChange={e => setTopicFilter(e.target.value)}>
+                    {topicOptions.map(option => (
+                      <option key={option} value={option}>{option === 'all' ? 'All' : option === 'bid' ? 'Bid' : option === 'report' ? 'Report' : option}</option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
               <label className="group-chat-target">
                 <span>Channel</span>
                 <select value={channelFilter} onChange={e => setChannelFilter(e.target.value)}>

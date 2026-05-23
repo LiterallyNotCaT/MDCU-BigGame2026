@@ -1,5 +1,6 @@
 import Link from 'next/link'
-import { ArrowRight, BarChart3, Gavel, ShieldCheck, Trophy } from 'lucide-react'
+import { ArrowRight, BarChart3, ClipboardList, Gavel, ShieldCheck, Trophy } from 'lucide-react'
+import { ADMIN_CONTACT_EMAILS } from '@/lib/contacts'
 
 const pages = [
   {
@@ -29,6 +30,13 @@ const pages = [
     title: 'Afternoon Scoreboard',
     icon: Trophy,
     accent: '#06b6d4',
+  },
+  {
+    id: 'form',
+    href: '/form',
+    title: 'Form',
+    icon: ClipboardList,
+    accent: '#8b5cf6',
   },
   {
     id: 'admin',
@@ -74,6 +82,13 @@ export default function HomePage() {
               )
             })}
           </div>
+          <footer className="page-contact-footer">
+            <span>Login problem contact:</span>
+            {ADMIN_CONTACT_EMAILS.map(email => (
+              <a key={email} href={`mailto:${email}?subject=BigGame%20login%20problem`} className="contact-email-button">{email}</a>
+            ))}
+            <span className="page-contact-note">Edit emails in ADMIN_CONTACT_EMAILS inside lib/contacts.ts.</span>
+          </footer>
         </div>
       </section>
     </main>
