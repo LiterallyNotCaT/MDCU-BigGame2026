@@ -19,6 +19,10 @@ export interface ScoringFormConfig {
   defaultFillToRank: number
   allowTies: boolean
   blank: boolean
+  rankCount: number
+  maxRounds: number
+  usesAutoRemainder: boolean
+  autoAfterHouseCount: number
 }
 
 export interface ScoringFormRound {
@@ -52,18 +56,21 @@ export function formKeyFor(tab: string, user: string, gid: string) {
   return `${tab}|${user}|${gid}`
 }
 
-export function inferFormKind(tab: string, user: string): Pick<ScoringFormConfig, 'kind' | 'defaultFillToRank' | 'allowTies' | 'blank'> {
+export function inferFormKind(
+  tab: string,
+  user: string
+): Pick<ScoringFormConfig, 'kind' | 'defaultFillToRank' | 'allowTies' | 'blank' | 'rankCount' | 'maxRounds' | 'usesAutoRemainder' | 'autoAfterHouseCount'> {
   const normalized = user.toLowerCase().replace(/\s+/g, ' ').trim()
   if (['event', 'snake ladder', 'money drop'].includes(normalized)) {
-    return { kind: 'placeholder', defaultFillToRank: 0, allowTies: false, blank: true }
+    return { kind: 'placeholder', defaultFillToRank: 0, allowTies: false, blank: true, rankCount: 0, maxRounds: 0, usesAutoRemainder: false, autoAfterHouseCount: 0 }
   }
   if (normalized.includes('dodge ball') || normalized.includes('territory control')) {
-    return { kind: 'match-single', defaultFillToRank: 1, allowTies: false, blank: false }
+    return { kind: 'match-single', defaultFillToRank: 1, allowTies: false, blank: false, rankCount: 2, maxRounds: 6, usesAutoRemainder: false, autoAfterHouseCount: 0 }
   }
-  if (normalized.includes('stacking block')) {
-    return { kind: 'ranking-single', defaultFillToRank: 4, allowTies: false, blank: false }
+  if (normalized.includes('stacking block') || normalized.includes('escape')) {
+    return { kind: 'ranking-single', defaultFillToRank: 4, allowTies: false, blank: false, rankCount: 4, maxRounds: 6, usesAutoRemainder: false, autoAfterHouseCount: 0 }
   }
-  return { kind: 'ranking-group', defaultFillToRank: tab === 'Games บ่าย' ? 3 : 3, allowTies: true, blank: false }
+  return { kind: 'ranking-group', defaultFillToRank: 3, allowTies: true, blank: false, rankCount: 4, maxRounds: tab === 'เช้าบน' ? 4 : 0, usesAutoRemainder: true, autoAfterHouseCount: 3 }
 }
 
 export function parseHouseList(value: unknown) {

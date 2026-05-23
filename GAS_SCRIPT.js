@@ -209,15 +209,15 @@ function makeFormKey_(tab, user, gid) {
 function inferFormMeta_(tab, user) {
   const normalized = String(user || '').toLowerCase().replace(/\s+/g, ' ').trim()
   if (['event', 'snake ladder', 'money drop'].indexOf(normalized) >= 0) {
-    return { kind: 'placeholder', defaultFillToRank: 0, allowTies: false, blank: true }
+    return { kind: 'placeholder', defaultFillToRank: 0, allowTies: false, blank: true, rankCount: 0, maxRounds: 0, usesAutoRemainder: false, autoAfterHouseCount: 0 }
   }
   if (normalized.indexOf('dodge ball') >= 0 || normalized.indexOf('territory control') >= 0) {
-    return { kind: 'match-single', defaultFillToRank: 1, allowTies: false, blank: false }
+    return { kind: 'match-single', defaultFillToRank: 1, allowTies: false, blank: false, rankCount: 2, maxRounds: 6, usesAutoRemainder: false, autoAfterHouseCount: 0 }
   }
-  if (normalized.indexOf('stacking block') >= 0) {
-    return { kind: 'ranking-single', defaultFillToRank: 4, allowTies: false, blank: false }
+  if (normalized.indexOf('stacking block') >= 0 || normalized.indexOf('escape') >= 0) {
+    return { kind: 'ranking-single', defaultFillToRank: 4, allowTies: false, blank: false, rankCount: 4, maxRounds: 6, usesAutoRemainder: false, autoAfterHouseCount: 0 }
   }
-  return { kind: 'ranking-group', defaultFillToRank: 3, allowTies: true, blank: false }
+  return { kind: 'ranking-group', defaultFillToRank: 3, allowTies: true, blank: false, rankCount: 4, maxRounds: String(tab) === 'เช้าบน' ? 4 : 0, usesAutoRemainder: true, autoAfterHouseCount: 3 }
 }
 
 function getPasswordSheet_() {
@@ -253,6 +253,10 @@ function readFormConfigs_(includePasswords) {
       defaultFillToRank: meta.defaultFillToRank,
       allowTies: meta.allowTies,
       blank: meta.blank,
+      rankCount: meta.rankCount,
+      maxRounds: meta.maxRounds,
+      usesAutoRemainder: meta.usesAutoRemainder,
+      autoAfterHouseCount: meta.autoAfterHouseCount,
     }
     if (includePasswords) form.password = password
     forms.push(form)
@@ -268,12 +272,10 @@ function findFormConfig_(formKey, includePassword) {
 function getAdminPassword_() {
   const sheet = getPasswordSheet_()
   if (!sheet) return ''
+  const formAdminPassword = String(sheet.getRange('G33').getDisplayValue() || '').trim()
+  if (formAdminPassword) return formAdminPassword
+
   const rows = sheet.getRange('A1:B25').getDisplayValues()
-  for (const row of rows) {
-    const label = String(row[0] || '').toLowerCase()
-    const password = String(row[1] || '').trim()
-    if (password && label.indexOf('admin') >= 0) return password
-  }
   return String(rows[4] && rows[4][1] || '').trim()
 }
 
@@ -389,11 +391,13 @@ function readFormState_(form) {
     if (hasData) lastRoundIndex = col
   }
   lastRoundIndex = Math.max(lastRoundIndex, 1)
+  if (form.maxRounds) lastRoundIndex = Math.min(lastRoundIndex, form.maxRounds)
 
   const a3 = String(rows[2] && rows[2][0] || '').trim()
   const fillToRank = clampFormFill_(control.fillToRank || (/^\d+$/.test(a3) ? a3 : form.defaultFillToRank), form.defaultFillToRank)
-  const rankLabels = rows.slice(3, 15).map((row, index) => String(row[0] || `Rank ${index + 1}`).trim())
-  const values = rows.slice(3, 15).map(row => row.slice(1, lastRoundIndex + 1).map(value => String(value || '').trim()))
+  const rankCount = Math.max(0, Math.min(12, Number(form.rankCount || 12)))
+  const rankLabels = rows.slice(3, 3 + rankCount).map((row, index) => String(row[0] || `Rank ${index + 1}`).trim())
+  const values = rows.slice(3, 3 + rankCount).map(row => row.slice(1, lastRoundIndex + 1).map(value => String(value || '').trim()))
   const rounds = []
   for (let col = 1; col <= lastRoundIndex; col++) {
     const roundControl = control.rounds[String(col - 1)] || {}
@@ -419,6 +423,10 @@ function readFormState_(form) {
       defaultFillToRank: form.defaultFillToRank,
       allowTies: form.allowTies,
       blank: form.blank,
+      rankCount: form.rankCount,
+      maxRounds: form.maxRounds,
+      usesAutoRemainder: form.usesAutoRemainder,
+      autoAfterHouseCount: form.autoAfterHouseCount,
     },
     title: String(rows[0] && rows[0][0] || form.user).trim(),
     fillToRank,
@@ -446,12 +454,13 @@ function validateFormAuth_(form, payload) {
 }
 
 function buildFormColumnValues_(form, values, fillToRank, participantsText) {
-  const rowCount = 12
+  const rowCount = Math.max(0, Math.min(12, Number(form.rankCount || 12)))
   const result = Array.from({ length: rowCount }, () => '')
   if (!Array.isArray(values)) throw new Error('Invalid values')
   if (form.kind === 'placeholder') throw new Error('This form is blank for now')
 
-  const manualLimit = form.kind === 'match-single' ? rowCount : fillToRank
+  const usesAutoRemainder = form.usesAutoRemainder === true
+  const manualLimit = usesAutoRemainder ? fillToRank : rowCount
   const used = {}
   for (let i = 0; i < manualLimit; i++) {
     const normalized = normalizeHouseText_(values[i] || '', form.allowTies)
@@ -464,8 +473,14 @@ function buildFormColumnValues_(form, values, fillToRank, participantsText) {
     result[i] = normalized
   }
 
-  if (form.kind !== 'match-single' && fillToRank < rowCount) {
-    result[fillToRank] = remainderText_(participantsText, result.slice(0, fillToRank))
+  if (usesAutoRemainder && fillToRank < rowCount) {
+    const manualValues = result.slice(0, fillToRank)
+    const seen = {}
+    manualValues.forEach(value => parseHouseList_(value).forEach(house => { seen[house] = true }))
+    const enteredHouseCount = Object.keys(seen).length
+    result[fillToRank] = enteredHouseCount >= (Number(form.autoAfterHouseCount) || fillToRank)
+      ? remainderText_(participantsText, manualValues)
+      : ''
   }
   return result
 }
@@ -505,7 +520,8 @@ function handleWriteFormScore(payload) {
     const col = roundIndex + 2
 
     sheet.getRange(4, col, values.length, 1).setValues(values.map(value => [value]))
-    sheet.getRange(17, col).setValue(participantsText)
+    if (values.length < 12) sheet.getRange(4 + values.length, col, 12 - values.length, 1).clearContent()
+    if (form.usesAutoRemainder === true) sheet.getRange(17, col).setValue(participantsText)
 
     // If A3 is already numeric, keep the sheet setting in sync. Otherwise keep
     // the visual table label untouched and store the setting in script props.

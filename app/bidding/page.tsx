@@ -716,7 +716,7 @@ function BiddingGame({ baan }: { baan:number }) {
             </div>
             {!isBetMode && (
               <div className="ml-auto">
-                <GroupChat actor={baan} topic="bid" />
+                <GroupChat actor={baan} />
               </div>
             )}
             <button onClick={()=>{sessionStorage.removeItem('baan_login');sessionStorage.removeItem('baan_login_token');window.location.reload()}}

@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { ArrowRight, BarChart3, ClipboardList, Gavel, ShieldCheck, Trophy } from 'lucide-react'
-import { ADMIN_CONTACT_EMAILS } from '@/lib/contacts'
+import ContactFooter from '@/components/ContactFooter'
 
 const pages = [
   {
@@ -82,13 +82,7 @@ export default function HomePage() {
               )
             })}
           </div>
-          <footer className="page-contact-footer">
-            <span>Login problem contact:</span>
-            {ADMIN_CONTACT_EMAILS.map(email => (
-              <a key={email} href={`mailto:${email}?subject=BigGame%20login%20problem`} className="contact-email-button">{email}</a>
-            ))}
-            <span className="page-contact-note">Edit emails in ADMIN_CONTACT_EMAILS inside lib/contacts.ts.</span>
-          </footer>
+          <ContactFooter className="page-contact-footer" />
         </div>
       </section>
     </main>

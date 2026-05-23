@@ -261,7 +261,7 @@ function AdminContent() {
           <div className="wire-title">ADMIN</div>
         </div>
         <div className="wire-topbar-actions">
-          <GroupChat actor="admin" label="Chat" topicOptions={['all', 'bid', 'report']} />
+          <GroupChat actor="admin" label="Chat" />
           <div className="wire-time">
             <Timer endTime={gs.timerEnd} isOpen={gs.isOpen} compact />
           </div>

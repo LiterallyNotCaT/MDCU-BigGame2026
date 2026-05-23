@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import clsx from 'clsx'
 import { CheckCircle2, Clock, FileSpreadsheet, KeyRound, Lock, RefreshCw, Send, Settings2, ShieldCheck, Unlock } from 'lucide-react'
+import ContactFooter from '@/components/ContactFooter'
 import GroupChat from '@/components/GroupChat'
 import HomeButton from '@/components/HomeButton'
 import {
@@ -15,7 +16,6 @@ import {
   type ScoringFormConfig,
   type ScoringFormState,
 } from '@/lib/forms'
-import { ADMIN_CONTACT_EMAILS } from '@/lib/contacts'
 
 type Session = {
   role: FormRole
@@ -56,14 +56,17 @@ function validatedColumn(
   participants: string,
 ) {
   const config = state.form
-  const normalized = Array.from({ length: state.rankLabels.length }, (_, rowIndex) => {
+  const rankCount = config.rankCount || state.rankLabels.length
+  const usesAutoRemainder = config.usesAutoRemainder === true
+  const autoAfterHouseCount = config.autoAfterHouseCount || fillToRank
+  const normalized = Array.from({ length: rankCount }, (_, rowIndex) => {
     const raw = draft[rowIndex]?.[roundIndex] ?? ''
     return normalizeHouseText(raw, config.allowTies)
   })
 
   if (config.kind === 'placeholder') return { ok: false, message: 'This form is blank for now.', values: normalized }
 
-  const manualLimit = config.kind === 'match-single' ? state.rankLabels.length : fillToRank
+  const manualLimit = usesAutoRemainder ? fillToRank : rankCount
   const used = new Set<number>()
   for (let rowIndex = 0; rowIndex < manualLimit; rowIndex++) {
     const houses = parseHouseList(normalized[rowIndex])
@@ -76,9 +79,13 @@ function validatedColumn(
     }
   }
 
-  if (config.kind !== 'match-single') {
+  if (usesAutoRemainder) {
     const remainderRow = fillToRank
-    normalized[remainderRow] = remainingHouseText(participants, normalized.slice(0, fillToRank))
+    const manualValues = normalized.slice(0, fillToRank)
+    const enteredHouseCount = new Set(manualValues.flatMap(value => parseHouseList(value))).size
+    normalized[remainderRow] = enteredHouseCount >= autoAfterHouseCount
+      ? remainingHouseText(participants, manualValues)
+      : ''
     for (let rowIndex = remainderRow + 1; rowIndex < normalized.length; rowIndex++) normalized[rowIndex] = ''
   }
 
@@ -160,7 +167,8 @@ export default function FormPage() {
       setDraft(blankDraft(data.state))
       setFillToRank(clampFillToRank(data.state.fillToRank || data.state.form.defaultFillToRank))
       setParticipantsByRound(data.state.rounds.map(round => defaultParticipants(round.participants)))
-      setSelectedRound(prev => Math.min(prev, Math.max(0, data.state.rounds.length - 1)))
+      const maxVisibleRounds = data.state.form.maxRounds || data.state.rounds.length
+      setSelectedRound(prev => Math.min(prev, Math.max(0, Math.min(data.state.rounds.length, maxVisibleRounds) - 1)))
     } catch (error) {
       notify('err', error instanceof Error ? error.message : String(error))
     } finally {
@@ -285,6 +293,15 @@ export default function FormPage() {
   }
 
   const selectedAutoRow = state?.form.kind !== 'match-single' ? fillToRank : -1
+  const visibleRankLabels = state
+    ? state.rankLabels.slice(0, state.form.rankCount || state.rankLabels.length)
+    : []
+  const visibleRounds = state
+    ? state.rounds.slice(0, state.form.maxRounds || state.rounds.length)
+    : []
+  const usesAutoRemainder = state?.form.usesAutoRemainder === true
+  const showAutoControls = Boolean(state && usesAutoRemainder)
+  const effectiveSelectedAutoRow = usesAutoRemainder ? selectedAutoRow : -1
   const headerTitle = session ? `Staff Form for ${session.username}` : 'Staff Form'
 
   return (
@@ -294,11 +311,11 @@ export default function FormPage() {
           <HomeButton className="bg-white/10 border-white/20 text-white hover:text-white" />
           <div>
             <div className="wire-title">{headerTitle}</div>
-            <div className="form-topbar-subtitle">Confirm-only scoring forms</div>
           </div>
         </div>
         <div className="form-topbar-actions">
-          {session?.role === 'staff' && <GroupChat actor={session.username} label="Report" topic="report" adminOnly />}
+          {session?.role === 'staff' && <GroupChat actor={session.username} label="Report" mode="report" />}
+          {adminSession && <GroupChat actor="admin" label="Report" mode="report" />}
           {adminSession ? (
             <button type="button" className="btn btn-success" onClick={() => setAdminSession(null)}>
               <ShieldCheck size={15} /> Admin
@@ -307,6 +324,22 @@ export default function FormPage() {
             <button type="button" className="btn btn-ghost" onClick={() => setShowAdminLogin(value => !value)}>
               <ShieldCheck size={15} /> Login as admin
             </button>
+          )}
+          {showAdminLogin && !adminSession && (
+            <div className="form-admin-popover">
+              <input
+                type="password"
+                value={adminInput}
+                onChange={event => setAdminInput(event.target.value)}
+                onKeyDown={event => { if (event.key === 'Enter') loginAdmin() }}
+                placeholder="Admin password"
+                className="input-base"
+                autoFocus
+              />
+              <button type="button" onClick={loginAdmin} className="btn btn-primary" disabled={!adminInput.trim()}>
+                Unlock
+              </button>
+            </div>
           )}
         </div>
       </header>
@@ -317,25 +350,6 @@ export default function FormPage() {
             <div className={clsx('form-notice', `form-notice-${notice.type}`)}>
               {notice.text}
             </div>
-          )}
-
-          {showAdminLogin && !adminSession && (
-            <section className="form-admin-login">
-              <div>
-                <div className="font-display text-sm font-black text-slate-900">Admin override</div>
-                <div className="text-xs font-semibold text-slate-500">Use the admin password from the password sheet.</div>
-              </div>
-              <input
-                type="password"
-                value={adminInput}
-                onChange={event => setAdminInput(event.target.value)}
-                placeholder="Admin password"
-                className="input-base"
-              />
-              <button type="button" onClick={loginAdmin} className="btn btn-primary" disabled={!adminInput.trim()}>
-                Unlock
-              </button>
-            </section>
           )}
 
           <section className="form-shell">
@@ -382,7 +396,6 @@ export default function FormPage() {
                 <div className="form-unlock-icon"><KeyRound size={22} /></div>
                 <div>
                   <h2>{currentForm.user}</h2>
-                  <p>Enter this subtab password to unlock only this form.</p>
                 </div>
                 <div className="form-unlock-row">
                   <input
@@ -411,7 +424,6 @@ export default function FormPage() {
                   <div>
                     <div className="text-label">Scoring table</div>
                     <h1>{state.title || state.form.user}</h1>
-                    <p>{state.form.tab} / {state.form.user}</p>
                   </div>
                   <button type="button" onClick={() => refreshState(state.form.formKey)} className="btn btn-ghost">
                     <RefreshCw size={14} /> Refresh
@@ -419,7 +431,7 @@ export default function FormPage() {
                 </div>
 
                 <div className="form-round-toolbar">
-                  {state.rounds.map((round, index) => (
+                  {visibleRounds.map((round, index) => (
                     <button
                       key={round.index}
                       type="button"
@@ -432,27 +444,31 @@ export default function FormPage() {
                   ))}
                 </div>
 
-                <div className="form-settings-row">
-                  <label>
-                    <span>Fill through rank</span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={11}
-                      value={fillToRank}
-                      onChange={event => setFillToRank(clampFillToRank(Number(event.target.value)))}
-                      disabled={!selectedCanEdit}
-                    />
-                  </label>
-                  <label>
-                    <span>Houses playing in selected round</span>
-                    <input
-                      value={participantsByRound[selectedRound] ?? ''}
-                      onChange={event => updateParticipants(selectedRound, event.target.value)}
-                      onBlur={event => updateParticipants(selectedRound, defaultParticipants(event.target.value))}
-                      disabled={!selectedCanEdit}
-                    />
-                  </label>
+                <div className={clsx('form-settings-row', !showAutoControls && 'manual-only')}>
+                  {showAutoControls && (
+                    <>
+                      <label>
+                        <span>Fill through rank</span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={11}
+                          value={fillToRank}
+                          onChange={event => setFillToRank(clampFillToRank(Number(event.target.value)))}
+                          disabled={!selectedCanEdit}
+                        />
+                      </label>
+                      <label>
+                        <span>Houses playing in selected round</span>
+                        <input
+                          value={participantsByRound[selectedRound] ?? ''}
+                          onChange={event => updateParticipants(selectedRound, event.target.value)}
+                          onBlur={event => updateParticipants(selectedRound, defaultParticipants(event.target.value))}
+                          disabled={!selectedCanEdit}
+                        />
+                      </label>
+                    </>
+                  )}
                   {adminSession && selectedRoundMeta && (
                     <div className="form-admin-controls">
                       <button type="button" disabled={controlBusy} onClick={() => setRoundControl(selectedRound, { locked: !selectedRoundMeta.locked })} className="btn btn-ghost">
@@ -474,7 +490,7 @@ export default function FormPage() {
                     <thead>
                       <tr>
                         <th>Rank</th>
-                        {state.rounds.map((round, roundIndex) => (
+                        {visibleRounds.map((round, roundIndex) => (
                           <th key={round.index} className={clsx(selectedRound === roundIndex && 'active-round')}>
                             <div>{round.label || `Round ${round.index}`}</div>
                             <small>Wave {round.wave || '-'}</small>
@@ -483,14 +499,17 @@ export default function FormPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {state.rankLabels.map((label, rowIndex) => (
-                        <tr key={`${label}-${rowIndex}`} className={clsx(rowIndex === selectedAutoRow && 'auto-row')}>
+                      {visibleRankLabels.map((label, rowIndex) => (
+                        <tr key={`${label}-${rowIndex}`} className={clsx(rowIndex === effectiveSelectedAutoRow && 'auto-row')}>
                           <th>{label || `Rank ${rowIndex + 1}`}</th>
-                          {state.rounds.map((round, roundIndex) => {
+                          {visibleRounds.map((round, roundIndex) => {
                             const editable = Boolean(session && (isAdmin || (!round.confirmed && !round.locked && !(round.deadlineAt && Date.now() > new Date(round.deadlineAt).getTime()))))
-                            const isAuto = state.form.kind !== 'match-single' && rowIndex === fillToRank
+                            const isAuto = usesAutoRemainder && rowIndex === fillToRank
                             const manualValues = draft.slice(0, fillToRank).map(row => row[roundIndex] ?? '')
-                            const autoValue = remainingHouseText(participantsByRound[roundIndex] ?? '', manualValues)
+                            const enteredHouseCount = new Set(manualValues.flatMap(value => parseHouseList(value))).size
+                            const autoValue = enteredHouseCount >= (state.form.autoAfterHouseCount || fillToRank)
+                              ? remainingHouseText(participantsByRound[roundIndex] ?? '', manualValues)
+                              : ''
                             return (
                               <td key={`${round.index}-${rowIndex}`} className={clsx(selectedRound === roundIndex && 'active-round')}>
                                 <input
@@ -505,27 +524,29 @@ export default function FormPage() {
                           })}
                         </tr>
                       ))}
-                      <tr className="form-participant-row">
-                        <th>Playing</th>
-                        {state.rounds.map((round, roundIndex) => {
-                          const editable = Boolean(session && (isAdmin || (!round.confirmed && !round.locked && !(round.deadlineAt && Date.now() > new Date(round.deadlineAt).getTime()))))
-                          return (
-                            <td key={round.index} className={clsx(selectedRound === roundIndex && 'active-round')}>
-                              <input
-                                value={participantsByRound[roundIndex] ?? ''}
-                                onChange={event => updateParticipants(roundIndex, event.target.value)}
-                                onBlur={event => updateParticipants(roundIndex, defaultParticipants(event.target.value))}
-                                disabled={!editable}
-                              />
-                            </td>
-                          )
-                        })}
-                      </tr>
+                      {showAutoControls && (
+                        <tr className="form-participant-row">
+                          <th>Playing</th>
+                          {visibleRounds.map((round, roundIndex) => {
+                            const editable = Boolean(session && (isAdmin || (!round.confirmed && !round.locked && !(round.deadlineAt && Date.now() > new Date(round.deadlineAt).getTime()))))
+                            return (
+                              <td key={round.index} className={clsx(selectedRound === roundIndex && 'active-round')}>
+                                <input
+                                  value={participantsByRound[roundIndex] ?? ''}
+                                  onChange={event => updateParticipants(roundIndex, event.target.value)}
+                                  onBlur={event => updateParticipants(roundIndex, defaultParticipants(event.target.value))}
+                                  disabled={!editable}
+                                />
+                              </td>
+                            )
+                          })}
+                        </tr>
+                      )}
                     </tbody>
                     <tfoot>
                       <tr>
                         <th>Confirm</th>
-                        {state.rounds.map((round, roundIndex) => {
+                        {visibleRounds.map((round, roundIndex) => {
                           const timedOut = Boolean(round.deadlineAt && Date.now() > new Date(round.deadlineAt).getTime())
                           const disabled = savingRound !== null || (!isAdmin && (round.confirmed || round.locked || timedOut))
                           return (
@@ -550,13 +571,7 @@ export default function FormPage() {
             )}
           </section>
 
-          <footer className="form-footer">
-            <span>Login problem contact:</span>
-            {ADMIN_CONTACT_EMAILS.map(email => (
-              <a key={email} href={`mailto:${email}?subject=BigGame%20login%20problem`} className="contact-email-button">{email}</a>
-            ))}
-            <span className="form-footer-note">Edit emails in ADMIN_CONTACT_EMAILS inside lib/contacts.ts.</span>
-          </footer>
+          <ContactFooter className="form-footer" />
         </div>
       </main>
     </div>
