@@ -3440,7 +3440,12 @@ form .btn.w-full {
   font-size: 0.78rem;
   color: rgba(255,255,255,0.82);
 }
-.group-chat-close {
+.group-chat-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.group-chat-icon-btn {
   width: 34px;
   height: 34px;
   display: inline-flex;
@@ -3448,6 +3453,10 @@ form .btn.w-full {
   justify-content: center;
   border-radius: 999px;
   background: rgba(255,255,255,0.16);
+  color: #fff;
+}
+.group-chat-icon-btn:hover {
+  background: rgba(255,255,255,0.24);
 }
 .group-chat-channel-filter {
   display: flex;
@@ -3677,6 +3686,18 @@ form .btn.w-full {
   background: #e2e8f0;
   color: #475569;
 }
+.group-chat-target-static {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #cbd8ea;
+  border-radius: 999px;
+  background: #fff;
+  padding: 6px 12px;
+  color: #172033;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
 .group-chat-replying {
   min-width: 0;
   display: inline-flex;
@@ -3814,22 +3835,33 @@ form .btn.w-full {
 }
 .form-shell {
   padding: clamp(12px, 1.6vw, 18px);
-  contain: layout paint;
+  position: relative;
+  z-index: 1;
+  overflow: visible;
+  contain: none;
 }
 .form-tabs,
 .form-subtabs,
 .form-round-toolbar {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  align-items: center;
 }
 .form-tabs {
   margin-bottom: 10px;
 }
 .form-subtabs {
+  flex-wrap: nowrap;
+  align-items: center;
   margin-bottom: 14px;
   border-bottom: 1px solid #e2e8f0;
   padding-bottom: 12px;
+  overflow: hidden;
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 .form-subtab,
 .form-round-chip {
@@ -3845,6 +3877,28 @@ form .btn.w-full {
   color: #334155;
   font-size: 0.82rem;
   font-weight: 900;
+  box-shadow: none;
+  transform: none !important;
+}
+.form-subtab {
+  min-height: 31px;
+  max-width: 116px;
+  gap: 4px;
+  padding: 5px 8px;
+  border-radius: 10px;
+  font-size: 0.68rem;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+.form-subtab span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.form-subtab svg {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
 }
 .form-subtab.active,
 .form-round-chip.active {
@@ -3903,7 +3957,10 @@ form .btn.w-full {
 }
 .form-workspace {
   padding: clamp(12px, 1.6vw, 18px);
-  contain: layout paint;
+  position: relative;
+  z-index: 0;
+  overflow: visible;
+  contain: none;
 }
 .form-table-header {
   display: flex;

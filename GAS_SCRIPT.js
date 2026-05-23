@@ -72,6 +72,9 @@ function doPost(e) {
     } else if (payload.action === 'readFormState') {
       const result = handleReadFormState(payload)
       output.setContent(JSON.stringify(result))
+    } else if (payload.action === 'readFormStates') {
+      const result = handleReadFormStates(payload)
+      output.setContent(JSON.stringify(result))
     } else if (payload.action === 'writeFormScore') {
       const result = handleWriteFormScore(payload)
       output.setContent(JSON.stringify(result))
@@ -99,20 +102,18 @@ function handleWriteChat(payload) {
   if (!message) return { status: 'error', message: 'Message is blank' }
   if (chatActorKey_(sendTo) === chatActorKey_(actor)) sendTo = 'public'
 
-  const lock = LockService.getScriptLock()
-  let locked = false
-  try {
-    lock.waitLock(30000)
-    locked = true
+  const ss = SpreadsheetApp.openById(SHEET_ID)
+  const chatGid = topic === 'report' ? REPORT_CHAT_GID : CHAT_GID
+  const sheet = getSheetByGid_(ss, chatGid)
+  if (!sheet) return { status: 'error', message: `Chat sheet gid ${chatGid} not found` }
+  const lockedReplyTarget = getPrivateReplyTarget_(sheet, replyToId, actor)
+  if (lockedReplyTarget) sendTo = lockedReplyTarget
 
-    const ss = SpreadsheetApp.openById(SHEET_ID)
-    const chatGid = topic === 'report' ? REPORT_CHAT_GID : CHAT_GID
-    const sheet = getSheetByGid_(ss, chatGid)
-    if (!sheet) return { status: 'error', message: `Chat sheet gid ${chatGid} not found` }
+  let lock = null
+  try {
+    lock = acquireNamedLock_(topic === 'report' ? 'REPORT_CHAT_LOCK' : 'CHAT_LOCK', 10000)
 
     const targetRow = Math.max(sheet.getLastRow() + 1, 2)
-    const lockedReplyTarget = getPrivateReplyTarget_(sheet, replyToId, actor)
-    if (lockedReplyTarget) sendTo = lockedReplyTarget
     const previousRow = targetRow > 2 ? targetRow - 1 : 1
     const previousId = Number(sheet.getRange(previousRow, 1).getValue())
     const chatId = Number.isFinite(previousId) && previousId > 0 ? previousId + 1 : targetRow - 1
@@ -135,7 +136,7 @@ function handleWriteChat(payload) {
   } catch (err) {
     return { status: 'error', message: 'Chat is busy. Please retry.' }
   } finally {
-    if (locked) lock.releaseLock()
+    releaseNamedLock_(lock)
   }
 }
 
@@ -240,6 +241,86 @@ function cacheRemove_(key) {
 
 function cacheKeyPart_(value) {
   return Utilities.base64EncodeWebSafe(String(value)).replace(/=+$/g, '').slice(0, 180)
+}
+
+const NAMED_LOCK_TTL_MS = 60000
+const NAMED_LOCK_TTL_BY_NAME = {
+  CHAT_LOCK: 20000,
+  REPORT_CHAT_LOCK: 20000,
+  FORM_WRITE_LOCK: 60000,
+  WAVE_WRITE_LOCK: 60000,
+}
+
+function namedLockTtlMs_(name) {
+  const normalized = String(name || '').toUpperCase()
+  const ttl = NAMED_LOCK_TTL_BY_NAME[normalized]
+  return Number.isFinite(ttl) && ttl >= 10000 ? ttl : NAMED_LOCK_TTL_MS
+}
+
+function namedLockKey_(name) {
+  return `BG_NAMED_LOCK_${String(name || '').replace(/[^A-Z0-9_]/gi, '_')}`
+}
+
+function acquireNamedLock_(name, waitMs) {
+  const key = namedLockKey_(name)
+  const token = `${Utilities.getUuid()}_${Date.now()}`
+  const deadline = Date.now() + Math.max(1000, Number(waitMs) || 30000)
+  const ttlMs = namedLockTtlMs_(name)
+  const props = PropertiesService.getScriptProperties()
+
+  while (Date.now() < deadline) {
+    const guard = LockService.getScriptLock()
+    let guardLocked = false
+    try {
+      guard.waitLock(Math.min(5000, Math.max(1000, deadline - Date.now())))
+      guardLocked = true
+      const now = Date.now()
+      const raw = props.getProperty(key)
+      let active = null
+      if (raw) {
+        try {
+          active = JSON.parse(raw)
+        } catch (err) {
+          active = null
+        }
+      }
+      if (!active || Number(active.expiresAt || 0) <= now) {
+        props.setProperty(key, JSON.stringify({ token, expiresAt: now + ttlMs }))
+        return { key, token, name }
+      }
+    } catch (err) {
+      // Retry until the named-lock deadline. The guard lock is held only while
+      // reserving a lock name, not during the expensive sheet write itself.
+    } finally {
+      if (guardLocked) guard.releaseLock()
+    }
+    Utilities.sleep(120 + Math.floor(Math.random() * 180))
+  }
+  throw new Error(`${name} is busy`)
+}
+
+function releaseNamedLock_(lockInfo) {
+  if (!lockInfo || !lockInfo.key || !lockInfo.token) return
+  const guard = LockService.getScriptLock()
+  let guardLocked = false
+  try {
+    guard.waitLock(5000)
+    guardLocked = true
+    const props = PropertiesService.getScriptProperties()
+    const raw = props.getProperty(lockInfo.key)
+    if (!raw) return
+    let active = null
+    try {
+      active = JSON.parse(raw)
+    } catch (err) {
+      active = null
+    }
+    if (!active || active.token === lockInfo.token) props.deleteProperty(lockInfo.key)
+  } catch (err) {
+    // Expired named locks self-heal on the next acquire.
+  } finally {
+    if (guardLocked) guard.releaseLock()
+  }
 }
 
 function formConfigCacheKey_(includePasswords) {
@@ -521,6 +602,31 @@ function handleReadFormState(payload) {
   return { status: 'ok', state: readFormState_(form) }
 }
 
+function handleReadFormStates(payload) {
+  const password = String(payload.password || '')
+  if (!password || password !== getAdminPassword_()) return { status: 'error', message: 'Wrong admin password' }
+
+  const requested = Array.isArray(payload.formKeys)
+    ? payload.formKeys.reduce((set, key) => {
+      if (key) set[String(key)] = true
+      return set
+    }, {})
+    : null
+  const forms = readFormConfigs_(false)
+  const states = {}
+  const errors = {}
+  forms.forEach(form => {
+    if (requested && !requested[form.formKey]) return
+    if (form.blank) return
+    try {
+      states[form.formKey] = readFormState_(form)
+    } catch (err) {
+      errors[form.formKey] = String(err && err.message ? err.message : err)
+    }
+  })
+  return { status: 'ok', states, errors }
+}
+
 function validateFormAuth_(form, payload) {
   const password = String(payload.password || '')
   if (payload.admin === true) {
@@ -573,13 +679,11 @@ function handleWriteFormScore(payload) {
   const roundIndex = Number(payload.roundIndex)
   if (!Number.isInteger(roundIndex) || roundIndex < 0) return { status: 'error', message: 'Invalid round' }
   const isAdmin = auth.role === 'admin'
-  const lock = LockService.getScriptLock()
-  let locked = false
+  const sheet = openFormSheet_(form)
+  let lock = null
   try {
-    lock.waitLock(30000)
-    locked = true
+    lock = acquireNamedLock_('FORM_WRITE_LOCK', 45000)
 
-    const sheet = openFormSheet_(form)
     const state = readFormStateFromSheet_(form, sheet)
     if (roundIndex >= state.rounds.length) return { status: 'error', message: 'Round not found' }
     const round = state.rounds[roundIndex]
@@ -626,7 +730,7 @@ function handleWriteFormScore(payload) {
       message: /lock|timeout|timed out/i.test(message) ? 'Form sheet is busy. Please retry.' : message,
     }
   } finally {
-    if (locked) lock.releaseLock()
+    releaseNamedLock_(lock)
   }
 }
 
@@ -638,11 +742,9 @@ function handleSetFormRoundControl(payload) {
   const roundIndex = Number(payload.roundIndex)
   if (!Number.isInteger(roundIndex) || roundIndex < 0) return { status: 'error', message: 'Invalid round' }
 
-  const lock = LockService.getScriptLock()
-  let locked = false
+  let lock = null
   try {
-    lock.waitLock(20000)
-    locked = true
+    lock = acquireNamedLock_('FORM_WRITE_LOCK', 20000)
     const control = readFormControl_(form.formKey)
     control.rounds = control.rounds || {}
     const round = control.rounds[String(roundIndex)] || {}
@@ -660,7 +762,7 @@ function handleSetFormRoundControl(payload) {
   } catch (err) {
     return { status: 'error', message: 'Form control is busy. Please retry.' }
   } finally {
-    if (locked) lock.releaseLock()
+    releaseNamedLock_(lock)
   }
 }
 
@@ -747,11 +849,9 @@ function handleWriteWave(payload) {
     return { status: 'error', message: 'Island bid minimum is 100' }
   }
 
-  const lock = LockService.getScriptLock()
-  let locked = false
+  let lock = null
   try {
-    lock.waitLock(30000)
-    locked = true
+    lock = acquireNamedLock_('WAVE_WRITE_LOCK', 45000)
 
   const ss        = SpreadsheetApp.openById(SHEET_ID)
   const sheetName = `Wave ${waveNumber}`
@@ -894,7 +994,7 @@ function handleWriteWave(payload) {
         : `Wave sheet write failed: ${message}`,
     }
   } finally {
-    if (locked) lock.releaseLock()
+    releaseNamedLock_(lock)
   }
 }
 

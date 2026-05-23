@@ -116,6 +116,7 @@ export default function FormPage() {
   const [tab, setTab] = useState(FORM_TABS[0])
   const [formKey, setFormKey] = useState('')
   const [state, setState] = useState<ScoringFormState | null>(null)
+  const [statesByFormKey, setStatesByFormKey] = useState<Record<string, ScoringFormState>>({})
   const [draft, setDraft] = useState<string[][]>([])
   const [participantsByRound, setParticipantsByRound] = useState<string[]>([])
   const [fillToRank, setFillToRank] = useState(3)
@@ -170,26 +171,65 @@ export default function FormPage() {
     }
   }, [])
 
+  const applyFormState = useCallback((nextState: ScoringFormState) => {
+    setState(nextState)
+    setDraft(blankDraft(nextState))
+    setFillToRank(clampFillToRank(nextState.fillToRank || nextState.form.defaultFillToRank))
+    setParticipantsByRound(nextState.rounds.map(round => defaultParticipants(round.participants)))
+    const maxVisibleRounds = nextState.form.maxRounds || nextState.rounds.length
+    setSelectedRound(prev => Math.min(prev, Math.max(0, Math.min(nextState.rounds.length, maxVisibleRounds) - 1)))
+  }, [])
+
+  const formKeysForTab = useCallback((tabName: string) => (
+    (grouped[tabName] ?? []).filter(form => !form.blank).map(form => form.formKey)
+  ), [grouped])
+
+  const loadAdminStatesForTab = useCallback(async (password: string, tabName: string) => {
+    const formKeys = formKeysForTab(tabName)
+    if (!formKeys.length) return {}
+    const data = await fetchJson<{ states: Record<string, ScoringFormState>; errors?: Record<string, string> }>('/api/forms/states', {
+      method: 'POST',
+      body: JSON.stringify({ password, formKeys }),
+    })
+    const nextStates = data.states ?? {}
+    setStatesByFormKey(prev => ({ ...prev, ...nextStates }))
+    return nextStates
+  }, [formKeysForTab])
+
   const refreshState = useCallback(async (nextFormKey = formKey) => {
     if (!nextFormKey) return
+    const cachedState = adminSession ? statesByFormKey[nextFormKey] : null
+    if (cachedState) {
+      applyFormState(cachedState)
+      return
+    }
+    const selectedForm = forms.find(form => form.formKey === nextFormKey)
     setLoadingState(true)
     try {
+      if (adminSession && selectedForm) {
+        const loadedStates = await loadAdminStatesForTab(adminSession.password, selectedForm.tab)
+        const selectedState = loadedStates[nextFormKey]
+        if (selectedState) {
+          applyFormState(selectedState)
+        } else {
+          setState(null)
+          setDraft([])
+          setParticipantsByRound([])
+        }
+        return
+      }
       const data = await fetchJson<{ state: ScoringFormState }>('/api/forms/state', {
         method: 'POST',
         body: JSON.stringify({ formKey: nextFormKey }),
       })
-      setState(data.state)
-      setDraft(blankDraft(data.state))
-      setFillToRank(clampFillToRank(data.state.fillToRank || data.state.form.defaultFillToRank))
-      setParticipantsByRound(data.state.rounds.map(round => defaultParticipants(round.participants)))
-      const maxVisibleRounds = data.state.form.maxRounds || data.state.rounds.length
-      setSelectedRound(prev => Math.min(prev, Math.max(0, Math.min(data.state.rounds.length, maxVisibleRounds) - 1)))
+      applyFormState(data.state)
+      setStatesByFormKey(prev => ({ ...prev, [nextFormKey]: data.state }))
     } catch (error) {
       notify('err', error instanceof Error ? error.message : String(error))
     } finally {
       setLoadingState(false)
     }
-  }, [formKey])
+  }, [adminSession, applyFormState, formKey, forms, loadAdminStatesForTab, statesByFormKey])
 
   useEffect(() => {
     refreshConfig()
@@ -235,6 +275,9 @@ export default function FormPage() {
         body: JSON.stringify({ admin: true, password: adminInput }),
       })
       if (!data.ok) throw new Error(data.message || 'Wrong admin password')
+      const statesData = await loadAdminStatesForTab(adminInput, currentForm?.tab ?? tab)
+      const selectedState = formKey ? statesData?.[formKey] : null
+      if (selectedState) applyFormState(selectedState)
       setAdminSession({ role: 'admin', username: 'Admin', password: adminInput })
       setAdminInput('')
       setShowAdminLogin(false)
@@ -302,6 +345,24 @@ export default function FormPage() {
           ),
         }
       })
+      setStatesByFormKey(prev => {
+        const cached = prev[state.form.formKey]
+        if (!cached) return prev
+        return {
+          ...prev,
+          [state.form.formKey]: {
+            ...cached,
+            fillToRank,
+            values: cached.values.map((row, rowIndex) => row.map((cell, colIndex) => (
+              colIndex === roundIndex ? validated.values[rowIndex] ?? '' : cell
+            ))),
+            rounds: cached.rounds.map((item, index) => index === roundIndex
+              ? { ...item, participants, confirmed: true, locked: false }
+              : item
+            ),
+          },
+        }
+      })
       notify('ok', `Saved ${round.label}`)
     } catch (error) {
       notify('err', error instanceof Error ? error.message : String(error))
@@ -339,6 +400,28 @@ export default function FormPage() {
             if (patch.clearDeadline === true) next.deadlineAt = ''
             return next
           }),
+        }
+      })
+      setStatesByFormKey(prev => {
+        const cached = prev[state.form.formKey]
+        if (!cached) return prev
+        return {
+          ...prev,
+          [state.form.formKey]: {
+            ...cached,
+            rounds: cached.rounds.map((round, index) => {
+              if (index !== roundIndex) return round
+              const next = { ...round }
+              if (patch.locked !== undefined) next.locked = patch.locked === true
+              if (patch.confirmed !== undefined) next.confirmed = patch.confirmed === true
+              if (patch.deadlineMinutes !== undefined) {
+                const minutes = Math.max(1, Math.min(240, Number(patch.deadlineMinutes) || 10))
+                next.deadlineAt = new Date(Date.now() + minutes * 60000).toISOString()
+              }
+              if (patch.clearDeadline === true) next.deadlineAt = ''
+              return next
+            }),
+          },
         }
       })
       notify('ok', 'Round control updated')
@@ -468,18 +551,17 @@ export default function FormPage() {
                   </button>
                 </div>
               </div>
-            ) : loadingState || !state ? (
-              <div className="form-empty-state">Loading table...</div>
-            ) : state.form.blank ? (
+            ) : currentForm.blank ? (
               <div className="form-empty-state">
                 <FileSpreadsheet size={26} />
-                <div>{state.form.user} is left blank for now.</div>
+                <div>{currentForm.user} is left blank for now.</div>
               </div>
+            ) : loadingState || !state ? (
+              <div className="form-empty-state">Loading table...</div>
             ) : (
               <div className="form-workspace">
                 <div className="form-table-header">
                   <div>
-                    <div className="text-label">Scoring table</div>
                     <h1>{state.title || state.form.user}</h1>
                   </div>
                   <button type="button" onClick={() => refreshState(state.form.formKey)} className="btn btn-ghost">

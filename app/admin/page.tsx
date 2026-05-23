@@ -88,7 +88,7 @@ function AdminContent() {
     setGameState(patch); setGS(getGameState())
   }
 
-  useEffect(() => startCloudSync(800), [])
+  useEffect(() => startCloudSync(1500), [])
 
   // ── Fetch all sheet scores ──────────────────────────────
   const fetchAll = useCallback(async () => {

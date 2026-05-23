@@ -58,7 +58,7 @@ function AmbassadorContent() {
     return unsub
   }, [isLoaded])
 
-  useEffect(() => startCloudSync(800), [])
+  useEffect(() => startCloudSync(1500), [])
 
   useEffect(() => {
     let cancelled = false

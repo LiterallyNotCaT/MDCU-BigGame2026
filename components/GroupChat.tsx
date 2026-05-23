@@ -2,9 +2,10 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import clsx from 'clsx'
-import { MessageCircle, Send, X } from 'lucide-react'
+import { MessageCircle, RefreshCw, Send, X } from 'lucide-react'
 import { HOUSE_COLORS, HOUSE_NAMES, normalizeChatPermissions, type ChatPermissions } from '@/lib/constants'
 import {
+  fetchGroupChatLatestId,
   fetchGroupChatMessages,
   sendGroupChatMessage,
   type GroupChatActor,
@@ -120,7 +121,6 @@ function canSendToTarget(target: string, actor: GroupChatActor, permissions: Cha
 }
 
 function canViewReportMessage(message: GroupChatMessage, actor: GroupChatActor) {
-  if ((message.topic || 'bid') !== 'report') return false
   if (isAdminActor(actor)) return true
   const currentActor = actorTarget(actor)
   return senderTarget(message) === currentActor || (message.sendTo || '') === currentActor
@@ -188,6 +188,7 @@ export default function GroupChat({
   const [error, setError] = useState('')
   const [chatPermissions, setChatPermissions] = useState(() => normalizeChatPermissions(getGameState().chatPermissions))
   const seenLatestRef = useRef<Record<string, string>>({})
+  const latestSheetIdRef = useRef('')
   const initializedRef = useRef(false)
   const listRef = useRef<HTMLDivElement | null>(null)
   const reportStaffOptions = useMemo(() => {
@@ -217,14 +218,16 @@ export default function GroupChat({
   }, [messages, reportTargets])
   const channelOptions = useMemo(() => mode === 'report'
     ? isAdminActor(actor)
-      ? [{ value: 'all', label: 'All' }, ...reportStaffOptions]
-      : [{ value: 'all', label: 'Admin' }]
+      ? reportStaffOptions
+      : [{ value: 'admin', label: 'Admin' }]
     : chatTargetOptions(actor, chatPermissions, true),
     [actor, chatPermissions, mode, reportStaffOptions]
   )
   const sendTargetOptions = useMemo(() => mode === 'report'
     ? isAdminActor(actor)
-      ? reportStaffOptions
+      ? channelFilter && channelFilter !== 'all'
+        ? reportStaffOptions.filter(option => option.value === channelFilter)
+        : []
       : [{ value: 'admin', label: 'Admin' }]
     : sendOptionsForChannel(actor, channelFilter, chatPermissions),
     [actor, channelFilter, chatPermissions, mode, reportStaffOptions]
@@ -275,7 +278,11 @@ export default function GroupChat({
   }, [channelFilter, sendTargetOptions])
 
   useEffect(() => {
-    if (!channelOptions.some(option => option.value === channelFilter)) setChannelFilter('all')
+    if (!channelOptions.length) {
+      if (channelFilter !== '') setChannelFilter('')
+      return
+    }
+    if (!channelOptions.some(option => option.value === channelFilter)) setChannelFilter(channelOptions[0].value)
   }, [channelFilter, channelOptions])
 
   const refresh = useCallback(async () => {
@@ -284,6 +291,7 @@ export default function GroupChat({
       const viewableNext = next.filter(message => mode === 'report'
         ? canViewReportMessage(message, actor)
         : (message.topic || 'bid') === 'bid' && canViewMessage(message, actor, chatPermissions))
+      latestSheetIdRef.current = next[next.length - 1]?.chatId || latestSheetIdRef.current
       const latestByChannel = latestIdsByChannel(viewableNext, actor)
       setMessages(next)
       setError('')
@@ -321,11 +329,33 @@ export default function GroupChat({
     }
   }, [actor, channelFilter, chatPermissions, mode, open])
 
+  const checkLatest = useCallback(async () => {
+    try {
+      const latestId = await fetchGroupChatLatestId(mode)
+      if (!latestId) return
+      if (!latestSheetIdRef.current) {
+        latestSheetIdRef.current = latestId
+        return
+      }
+      if (latestId !== latestSheetIdRef.current) {
+        await refresh()
+      }
+    } catch (e) {
+      console.error(e)
+    }
+  }, [mode, refresh])
+
   useEffect(() => {
     refresh()
-    const intervalId = window.setInterval(refresh, 5000)
-    return () => window.clearInterval(intervalId)
   }, [refresh])
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      if (open) void refresh()
+      else void checkLatest()
+    }, open ? 10000 : 30000)
+    return () => window.clearInterval(intervalId)
+  }, [checkLatest, open, refresh])
 
   useEffect(() => {
     if (!open) {
@@ -369,7 +399,7 @@ export default function GroupChat({
     e.preventDefault()
     const message = draft.trim()
     if (!message || sending) return
-    const target = lockedReplyTarget || sendTo
+    const target = mode === 'report' ? (lockedReplyTarget || sendTargetOptions[0]?.value || '') : (lockedReplyTarget || sendTo)
     const canSend = mode === 'report'
       ? isAdminActor(actor)
         ? Boolean(target && target !== 'admin' && target !== 'public')
@@ -423,20 +453,28 @@ export default function GroupChat({
                 <div className="group-chat-title">Group chat</div>
                 <div className="group-chat-subtitle">{actorLabel(actor)}</div>
               </div>
-              <button type="button" onClick={() => setOpen(false)} className="group-chat-close" aria-label="Close group chat">
-                <X size={18} />
-              </button>
+              <div className="group-chat-header-actions">
+                <button type="button" onClick={() => void refresh()} className="group-chat-icon-btn" aria-label="Refresh chat">
+                  <RefreshCw size={17} />
+                </button>
+                <button type="button" onClick={() => setOpen(false)} className="group-chat-icon-btn" aria-label="Close group chat">
+                  <X size={18} />
+                </button>
+              </div>
             </div>
             <div className="group-chat-channel-filter">
               <label className="group-chat-target">
                 <span>Channel</span>
                 <select value={channelFilter} onChange={e => setChannelFilter(e.target.value)}>
                   {channelOptions.map(option => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
+                    <option key={option.value} value={option.value}>
+                      {hasUnreadChannel(option.value) ? `● ${option.label}` : option.label}
+                    </option>
                   ))}
                 </select>
               </label>
-              <div className="group-chat-channel-pills" aria-label="Chat channels">
+              {mode !== 'report' && (
+                <div className="group-chat-channel-pills" aria-label="Chat channels">
                 {channelOptions.map(option => (
                   <button
                     key={option.value}
@@ -448,7 +486,8 @@ export default function GroupChat({
                     {hasUnreadChannel(option.value) && <span className="group-chat-channel-dot" />}
                   </button>
                 ))}
-              </div>
+                </div>
+              )}
             </div>
 
             <div ref={listRef} className="group-chat-list">
@@ -504,17 +543,23 @@ export default function GroupChat({
             {error && <div className="group-chat-error">{error}</div>}
             <form onSubmit={submit} className="group-chat-form">
               <div className="group-chat-compose-tools">
-                <label className="group-chat-target">
-                  <span>To</span>
-                <select value={sendTo} onChange={e => setSendTo(e.target.value)} disabled={Boolean(lockedReplyTarget) || !composeTargetOptions.length}>
-                    {!composeTargetOptions.length && (
-                      <option value="">No channels</option>
-                    )}
-                    {composeTargetOptions.map(option => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-                </label>
+                {mode === 'report' ? (
+                  <div className="group-chat-target-static">
+                    To {composeTargetOptions[0]?.label ?? 'No channel'}
+                  </div>
+                ) : (
+                  <label className="group-chat-target">
+                    <span>To</span>
+                    <select value={sendTo} onChange={e => setSendTo(e.target.value)} disabled={Boolean(lockedReplyTarget) || !composeTargetOptions.length}>
+                      {!composeTargetOptions.length && (
+                        <option value="">No channels</option>
+                      )}
+                      {composeTargetOptions.map(option => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 {replyTo && (
                   <div className="group-chat-replying">
                     <span>

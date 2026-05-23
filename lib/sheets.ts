@@ -425,6 +425,16 @@ export async function fetchGroupChatMessages(mode: 'bid' | 'report' = 'bid'): Pr
   return messages
 }
 
+export async function fetchGroupChatLatestId(mode: 'bid' | 'report' = 'bid'): Promise<string> {
+  const gid = mode === 'report' ? REPORT_CHAT_GID : CHAT_GID
+  const rows = await fetchGidRangeGViz(gid, 'A2:A')
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const value = cleanChatCell(rows[i]?.[0] ?? '')
+    if (value) return /^\d+$/.test(value) ? value : `${i + 2}:${value}`
+  }
+  return ''
+}
+
 export async function sendGroupChatMessage(
   actor: GroupChatActor,
   message: string,

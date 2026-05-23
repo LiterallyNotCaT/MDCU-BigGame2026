@@ -879,7 +879,7 @@ function BiddingGame({ baan }: { baan:number }) {
 export default function BiddingPage() {
   const [baan,     setBaan]     = useState<number|null>(null)
   const [checking, setChecking] = useState(true)
-  useEffect(() => startCloudSync(800), [])
+  useEffect(() => startCloudSync(1500), [])
   useEffect(()=>{
     let cancelled = false
     const t = setTimeout(async () => {
