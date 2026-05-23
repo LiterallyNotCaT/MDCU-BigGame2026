@@ -3298,6 +3298,22 @@ form .btn.w-full {
   right: 4px;
 }
 .game-map .map-tile-disasters span { font-size: 0.48rem !important; }
+.map-king-disaster-notice {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 6px 10px;
+  color: #172033;
+  font-size: clamp(0.72rem, 0.9vw, 0.86rem);
+  font-weight: 900;
+  line-height: 1.15;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+}
 .game-map .map-tile-king {
   aspect-ratio: 1 / 1 !important;
   max-height: none !important;

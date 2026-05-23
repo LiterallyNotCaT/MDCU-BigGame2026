@@ -65,9 +65,8 @@ function GameMap({
         </div>
       )}
       {kingDisaster != null && !filterDisaster && (
-        <div className="toast-lift flex items-center gap-2 px-3 py-2 rounded-2xl bg-fuchsia-800 border border-yellow-300 text-xs text-white shadow-[0_18px_45px_rgba(190,24,93,0.30)]">
-          <span className="font-mono font-bold">D{kingDisaster}</span>
-          <span>King disaster {kingDisaster} is highlighted</span>
+        <div className="map-king-disaster-notice">
+          <span>King บ้าน {currentKing ?? '-'} เลือก disaster {kingDisaster}</span>
         </div>
       )}
 

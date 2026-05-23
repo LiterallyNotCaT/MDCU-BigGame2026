@@ -138,6 +138,7 @@ export default function FormPage() {
   const grouped = useMemo(() => groupByTab(forms), [forms])
   const currentForms = grouped[tab] ?? []
   const currentForm = forms.find(form => form.formKey === formKey) ?? currentForms[0] ?? null
+  const currentState = currentForm && state?.form.formKey === currentForm.formKey ? state : null
   const reportTargets = useMemo(() => {
     const seen = new Set<string>()
     return forms.flatMap(form => {
@@ -151,9 +152,9 @@ export default function FormPage() {
   const canSeeContent = Boolean(currentForm && (adminSession || sessions[currentForm.formKey]))
   const canLoadSelectedForm = Boolean(formKey && (adminSession || sessions[formKey]))
   const isAdmin = session?.role === 'admin'
-  const selectedRoundMeta = state?.rounds[selectedRound] ?? null
+  const selectedRoundMeta = currentState?.rounds[selectedRound] ?? null
   const selectedIsTimedOut = Boolean(selectedRoundMeta?.deadlineAt && Date.now() > new Date(selectedRoundMeta.deadlineAt).getTime())
-  const selectedCanEdit = Boolean(state && session && (isAdmin || (!selectedRoundMeta?.confirmed && !selectedRoundMeta?.locked && !selectedIsTimedOut)))
+  const selectedCanEdit = Boolean(currentState && session && (isAdmin || (!selectedRoundMeta?.confirmed && !selectedRoundMeta?.locked && !selectedIsTimedOut)))
 
   const notify = (type: 'ok' | 'err' | 'warn', text: string) => {
     setNotice({ type, text })
@@ -177,6 +178,7 @@ export default function FormPage() {
 
   const applyFormState = useCallback((nextState: ScoringFormState) => {
     setStateLoadError('')
+    setLoadingState(false)
     setState(nextState)
     setDraft(blankDraft(nextState))
     setFillToRank(clampFillToRank(nextState.fillToRank || nextState.form.defaultFillToRank))
@@ -201,9 +203,9 @@ export default function FormPage() {
     return nextStates
   }, [formKeysForTab])
 
-  const refreshState = useCallback(async (nextFormKey = formKey) => {
+  const refreshState = useCallback(async (nextFormKey = formKey, options?: { force?: boolean }) => {
     if (!nextFormKey) return
-    const cachedState = adminSession ? statesByFormKey[nextFormKey] : null
+    const cachedState = options?.force ? null : statesByFormKey[nextFormKey]
     if (cachedState) {
       applyFormState(cachedState)
       return
@@ -248,6 +250,7 @@ export default function FormPage() {
   useEffect(() => {
     if (!formKey) return
     if (canLoadSelectedForm) {
+      if (currentState?.form.formKey === formKey) return
       refreshState(formKey)
       return
     }
@@ -256,7 +259,7 @@ export default function FormPage() {
     setParticipantsByRound([])
     setStateLoadError('')
     setSelectedRound(0)
-  }, [canLoadSelectedForm, formKey, refreshState])
+  }, [canLoadSelectedForm, currentState?.form.formKey, formKey, refreshState])
 
   const loginStaff = async () => {
     if (!currentForm || !passwordInput.trim()) return
@@ -275,7 +278,7 @@ export default function FormPage() {
         applyFormState(data.state)
         setStatesByFormKey(prev => ({ ...prev, [currentForm.formKey]: data.state! }))
       } else if (!currentForm.blank) {
-        await refreshState(currentForm.formKey)
+        await refreshState(currentForm.formKey, { force: true })
       }
       setPasswordInput('')
       notify('ok', `Logged in as ${username}`)
@@ -316,14 +319,14 @@ export default function FormPage() {
   }
 
   const confirmRound = async (roundIndex: number) => {
-    if (!state || !session) return
-    const round = state.rounds[roundIndex]
+    if (!currentState || !session) return
+    const round = currentState.rounds[roundIndex]
     if (!isAdmin && (round.confirmed || round.locked)) {
       notify('warn', 'This round is already locked or confirmed.')
       return
     }
     const participants = defaultParticipants(participantsByRound[roundIndex] ?? '')
-    const validated = validatedColumn(state, draft, roundIndex, fillToRank, participants)
+    const validated = validatedColumn(currentState, draft, roundIndex, fillToRank, participants)
     if (!validated.ok) {
       notify('err', validated.message || 'Invalid data')
       return
@@ -335,7 +338,7 @@ export default function FormPage() {
       await fetchJson('/api/forms/write', {
         method: 'POST',
         body: JSON.stringify({
-          formKey: state.form.formKey,
+          formKey: currentState.form.formKey,
           password: session.password,
           admin: isAdmin,
           roundIndex,
@@ -349,7 +352,7 @@ export default function FormPage() {
       ))))
       setParticipantsByRound(prev => prev.map((cell, index) => index === roundIndex ? participants : cell))
       setState(prev => {
-        if (!prev || prev.form.formKey !== state.form.formKey) return prev
+        if (!prev || prev.form.formKey !== currentState.form.formKey) return prev
         return {
           ...prev,
           fillToRank,
@@ -363,11 +366,11 @@ export default function FormPage() {
         }
       })
       setStatesByFormKey(prev => {
-        const cached = prev[state.form.formKey]
+        const cached = prev[currentState.form.formKey]
         if (!cached) return prev
         return {
           ...prev,
-          [state.form.formKey]: {
+          [currentState.form.formKey]: {
             ...cached,
             fillToRank,
             values: cached.values.map((row, rowIndex) => row.map((cell, colIndex) => (
@@ -389,20 +392,20 @@ export default function FormPage() {
   }
 
   const setRoundControl = async (roundIndex: number, patch: Record<string, unknown>) => {
-    if (!state || !adminSession) return
+    if (!currentState || !adminSession) return
     setControlBusy(true)
     try {
       await fetchJson('/api/forms/control', {
         method: 'POST',
         body: JSON.stringify({
-          formKey: state.form.formKey,
+          formKey: currentState.form.formKey,
           password: adminSession.password,
           roundIndex,
           ...patch,
         }),
       })
       setState(prev => {
-        if (!prev || prev.form.formKey !== state.form.formKey) return prev
+        if (!prev || prev.form.formKey !== currentState.form.formKey) return prev
         return {
           ...prev,
           rounds: prev.rounds.map((round, index) => {
@@ -420,11 +423,11 @@ export default function FormPage() {
         }
       })
       setStatesByFormKey(prev => {
-        const cached = prev[state.form.formKey]
+        const cached = prev[currentState.form.formKey]
         if (!cached) return prev
         return {
           ...prev,
-          [state.form.formKey]: {
+          [currentState.form.formKey]: {
             ...cached,
             rounds: cached.rounds.map((round, index) => {
               if (index !== roundIndex) return round
@@ -449,15 +452,15 @@ export default function FormPage() {
     }
   }
 
-  const selectedAutoRow = state?.form.kind !== 'match-single' ? fillToRank : -1
-  const visibleRankLabels = state
-    ? state.rankLabels.slice(0, state.form.rankCount || state.rankLabels.length)
+  const selectedAutoRow = currentState && currentState.form.kind !== 'match-single' ? fillToRank : -1
+  const visibleRankLabels = currentState
+    ? currentState.rankLabels.slice(0, currentState.form.rankCount || currentState.rankLabels.length)
     : []
-  const visibleRounds = state
-    ? state.rounds.slice(0, state.form.maxRounds || state.rounds.length)
+  const visibleRounds = currentState
+    ? currentState.rounds.slice(0, currentState.form.maxRounds || currentState.rounds.length)
     : []
-  const usesAutoRemainder = state?.form.usesAutoRemainder === true
-  const showAutoControls = Boolean(state && usesAutoRemainder)
+  const usesAutoRemainder = currentState?.form.usesAutoRemainder === true
+  const showAutoControls = Boolean(currentState && usesAutoRemainder)
   const effectiveSelectedAutoRow = usesAutoRemainder ? selectedAutoRow : -1
   const headerTitle = session ? `Staff Form for ${session.username}` : 'Staff Form'
 
@@ -573,12 +576,12 @@ export default function FormPage() {
                 <FileSpreadsheet size={26} />
                 <div>{currentForm.user} is left blank for now.</div>
               </div>
-            ) : loadingState ? (
+            ) : loadingState && !currentState ? (
               <div className="form-empty-state">Loading table...</div>
-            ) : !state ? (
+            ) : !currentState ? (
               <div className="form-empty-state">
                 <div>{stateLoadError || 'Table is not loaded.'}</div>
-                <button type="button" onClick={() => refreshState(currentForm.formKey)} className="btn btn-primary">
+                <button type="button" onClick={() => refreshState(currentForm.formKey, { force: true })} className="btn btn-primary">
                   <RefreshCw size={14} /> Retry
                 </button>
               </div>
@@ -586,9 +589,9 @@ export default function FormPage() {
               <div className="form-workspace">
                 <div className="form-table-header">
                   <div>
-                    <h1>{state.title || state.form.user}</h1>
+                    <h1>{currentState.title || currentState.form.user}</h1>
                   </div>
-                  <button type="button" onClick={() => refreshState(state.form.formKey)} className="btn btn-ghost">
+                  <button type="button" onClick={() => refreshState(currentState.form.formKey, { force: true })} className="btn btn-ghost">
                     <RefreshCw size={14} /> Refresh
                   </button>
                 </div>
@@ -670,7 +673,7 @@ export default function FormPage() {
                             const isAuto = usesAutoRemainder && rowIndex === fillToRank
                             const manualValues = draft.slice(0, fillToRank).map(row => row[roundIndex] ?? '')
                             const enteredHouseCount = new Set(manualValues.flatMap(value => parseHouseList(value))).size
-                            const autoValue = enteredHouseCount >= (state.form.autoAfterHouseCount || fillToRank)
+                            const autoValue = enteredHouseCount >= (currentState.form.autoAfterHouseCount || fillToRank)
                               ? remainingHouseText(participantsByRound[roundIndex] ?? '', manualValues)
                               : ''
                             return (
@@ -678,7 +681,7 @@ export default function FormPage() {
                                 <input
                                   value={isAuto ? autoValue : draft[rowIndex]?.[roundIndex] ?? ''}
                                   onChange={event => updateCell(rowIndex, roundIndex, event.target.value)}
-                                  onBlur={event => updateCell(rowIndex, roundIndex, normalizeHouseText(event.target.value, state.form.allowTies))}
+                                  onBlur={event => updateCell(rowIndex, roundIndex, normalizeHouseText(event.target.value, currentState.form.allowTies))}
                                   disabled={!editable || isAuto}
                                   className={clsx(isAuto && 'auto-input')}
                                 />
