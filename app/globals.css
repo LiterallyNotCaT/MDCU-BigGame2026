@@ -4101,6 +4101,19 @@ form .btn.w-full {
   background: #fffbeb !important;
   color: #92400e !important;
 }
+.form-score-note {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px 12px;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 850;
+  line-height: 1.25;
+}
+.form-score-note strong {
+  color: #334155;
+}
 .form-participant-row th,
 .form-participant-row td {
   background: #f5f3ff !important;

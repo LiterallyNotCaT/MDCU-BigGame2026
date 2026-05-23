@@ -324,7 +324,7 @@ function releaseNamedLock_(lockInfo) {
 }
 
 function formConfigCacheKey_(includePasswords) {
-  return `FORM_CONFIG_V5_${includePasswords ? 'private' : 'public'}`
+  return `FORM_CONFIG_V8_${includePasswords ? 'private' : 'public'}`
 }
 
 function formAdminPasswordCacheKey_() {
@@ -332,7 +332,7 @@ function formAdminPasswordCacheKey_() {
 }
 
 function formStateCacheKey_(form) {
-  return `FORM_STATE_V4_${cacheKeyPart_(form.formKey)}`
+  return `FORM_STATE_V7_${cacheKeyPart_(form.formKey)}`
 }
 
 function invalidateFormState_(form) {
@@ -341,11 +341,20 @@ function invalidateFormState_(form) {
 
 function inferFormMeta_(tab, user) {
   const normalized = String(user || '').toLowerCase().replace(/\s+/g, ' ').trim()
-  if (['event', 'snake ladder', 'money drop'].indexOf(normalized) >= 0) {
+  if (normalized === 'money drop') {
+    return { kind: 'score-number', defaultFillToRank: 1, allowTies: false, blank: false, rankCount: 12, maxRounds: 4, usesAutoRemainder: false, autoAfterHouseCount: 0 }
+  }
+  if (normalized === 'snake ladder') {
+    return { kind: 'score-unsigned', defaultFillToRank: 1, allowTies: false, blank: false, rankCount: 12, maxRounds: 4, usesAutoRemainder: false, autoAfterHouseCount: 0 }
+  }
+  if (normalized === 'event') {
     return { kind: 'placeholder', defaultFillToRank: 0, allowTies: false, blank: true, rankCount: 0, maxRounds: 0, usesAutoRemainder: false, autoAfterHouseCount: 0 }
   }
   if (normalized.indexOf('dodge ball') >= 0 || normalized.indexOf('territory control') >= 0) {
     return { kind: 'match-single', defaultFillToRank: 1, allowTies: false, blank: false, rankCount: 2, maxRounds: 6, usesAutoRemainder: false, autoAfterHouseCount: 0 }
+  }
+  if (normalized.indexOf('escape') >= 0 && String(tab) === 'เช้าบน') {
+    return { kind: 'ranking-single', defaultFillToRank: 6, allowTies: false, blank: false, rankCount: 6, maxRounds: 7, usesAutoRemainder: false, autoAfterHouseCount: 0 }
   }
   if (normalized.indexOf('stacking block') >= 0 || normalized.indexOf('escape') >= 0) {
     return { kind: 'ranking-single', defaultFillToRank: 4, allowTies: false, blank: false, rankCount: 4, maxRounds: 6, usesAutoRemainder: false, autoAfterHouseCount: 0 }
@@ -484,6 +493,10 @@ function openFormSheet_(form) {
   return sheet
 }
 
+function formValueStartColumn_(form) {
+  return form && form.kind === 'score-unsigned' ? 11 : 2
+}
+
 function formNumber_(value) {
   const n = Number(String(value || '').replace(/,/g, '').trim())
   return Number.isFinite(n) ? n : 0
@@ -518,6 +531,14 @@ function normalizeHouseText_(value, allowMany) {
   return formatHouseList_(allowMany ? houses : houses.slice(0, 1))
 }
 
+function normalizeScoreNumber_(value, allowNegative) {
+  const compact = String(value || '').replace(/[,\s]/g, '').trim()
+  const pattern = allowNegative === false ? /^\d+$/ : /^-?\d+$/
+  if (!pattern.test(compact)) return ''
+  const number = Number(compact)
+  return Number.isSafeInteger(number) ? String(number) : ''
+}
+
 function defaultParticipants_(value) {
   const houses = parseHouseList_(value)
   return formatHouseList_(houses.length ? houses : [1,2,3,4,5,6,7,8,9,10,11,12])
@@ -535,8 +556,9 @@ function readFormStateFromSheet_(form, sheet) {
   const lastCol = Math.min(Math.max(sheet.getLastColumn(), 2), 26)
   const rows = sheet.getRange(1, 1, 17, lastCol).getDisplayValues()
   const control = readFormControl_(form.formKey)
-  let lastRoundIndex = 0
-  for (let col = 1; col < lastCol; col++) {
+  const startColIndex = Math.max(1, formValueStartColumn_(form) - 1)
+  let lastSheetColIndex = startColIndex - 1
+  for (let col = startColIndex; col < lastCol; col++) {
     let hasData = false
     for (let row = 2; row <= 16; row++) {
       if (String(rows[row] && rows[row][col] || '').trim()) {
@@ -544,22 +566,23 @@ function readFormStateFromSheet_(form, sheet) {
         break
       }
     }
-    if (hasData) lastRoundIndex = col
+    if (hasData) lastSheetColIndex = col
   }
-  lastRoundIndex = Math.max(lastRoundIndex, 1)
-  if (form.maxRounds) lastRoundIndex = Math.min(lastRoundIndex, form.maxRounds)
+  let roundCount = Math.max(lastSheetColIndex - startColIndex + 1, 1)
+  if (form.maxRounds) roundCount = Math.min(roundCount, form.maxRounds)
 
   const a3 = String(rows[2] && rows[2][0] || '').trim()
   const fillToRank = clampFormFill_(control.fillToRank || (/^\d+$/.test(a3) ? a3 : form.defaultFillToRank), form.defaultFillToRank)
   const rankCount = Math.max(0, Math.min(12, Number(form.rankCount || 12)))
   const rankLabels = rows.slice(3, 3 + rankCount).map((row, index) => String(row[0] || `Rank ${index + 1}`).trim())
-  const values = rows.slice(3, 3 + rankCount).map(row => row.slice(1, lastRoundIndex + 1).map(value => String(value || '').trim()))
+  const values = rows.slice(3, 3 + rankCount).map(row => row.slice(startColIndex, startColIndex + roundCount).map(value => String(value || '').trim()))
   const rounds = []
-  for (let col = 1; col <= lastRoundIndex; col++) {
-    const roundControl = control.rounds[String(col - 1)] || {}
+  for (let offset = 0; offset < roundCount; offset++) {
+    const col = startColIndex + offset
+    const roundControl = control.rounds[String(offset)] || {}
     rounds.push({
-      index: col - 1,
-      label: String(rows[2] && rows[2][col] || `Round ${col}`).trim(),
+      index: offset,
+      label: String(rows[2] && rows[2][col] || `Round ${offset + 1}`).trim(),
       wave: String(rows[15] && rows[15][col] || '').trim(),
       participants: defaultParticipants_(String(rows[16] && rows[16][col] || '').trim()),
       confirmed: roundControl.confirmed === true,
@@ -650,6 +673,18 @@ function buildFormColumnValues_(form, values, fillToRank, participantsText) {
   const result = Array.from({ length: rowCount }, () => '')
   if (!Array.isArray(values)) throw new Error('Invalid values')
   if (form.kind === 'placeholder') throw new Error('This form is blank for now')
+  if (form.kind === 'score-number' || form.kind === 'score-unsigned') {
+    const allowNegative = form.kind === 'score-number'
+    for (let i = 0; i < rowCount; i++) {
+      const raw = values[i] || ''
+      const normalized = normalizeScoreNumber_(raw, allowNegative)
+      if (String(raw || '').trim() && !normalized) {
+        throw new Error(allowNegative ? 'Money Drop accepts numbers only' : 'Snake Ladder accepts unsigned integers only')
+      }
+      result[i] = normalized
+    }
+    return result
+  }
 
   const usesAutoRemainder = form.usesAutoRemainder === true
   const manualLimit = usesAutoRemainder ? fillToRank : rowCount
@@ -707,7 +742,7 @@ function handleWriteFormScore(payload) {
     const fillToRank = clampFormFill_(payload.fillToRank, form.defaultFillToRank)
     const participantsText = defaultParticipants_(payload.participants || round.participants)
     const values = buildFormColumnValues_(form, payload.values || [], fillToRank, participantsText)
-    const col = roundIndex + 2
+    const col = formValueStartColumn_(form) + roundIndex
 
     sheet.getRange(4, col, values.length, 1).setValues(values.map(value => [value]))
     if (values.length < 12) sheet.getRange(4 + values.length, col, 12 - values.length, 1).clearContent()

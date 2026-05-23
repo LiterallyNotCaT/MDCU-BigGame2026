@@ -90,6 +90,23 @@ function staffChatName(name: string) {
   return clean.toLowerCase().startsWith('staff ') ? clean : `Staff ${clean}`
 }
 
+function sanitizeScoreInput(value: string, allowNegative: boolean) {
+  const compact = String(value ?? '').replace(/[,\s]/g, '')
+  if (!allowNegative && compact.includes('-')) return ''
+  const negative = allowNegative && compact.startsWith('-')
+  const digits = compact.replace(/-/g, '').replace(/\D/g, '')
+  if (!digits) return negative ? '-' : ''
+  return `${negative ? '-' : ''}${digits}`
+}
+
+function normalizeScoreText(value: string, allowNegative: boolean) {
+  const compact = sanitizeScoreInput(value, allowNegative)
+  const pattern = allowNegative ? /^-?\d+$/ : /^\d+$/
+  if (!pattern.test(compact)) return ''
+  const number = Number(compact)
+  return Number.isSafeInteger(number) ? String(number) : ''
+}
+
 function validatedColumn(
   state: ScoringFormState,
   draft: string[][],
@@ -101,6 +118,23 @@ function validatedColumn(
   const rankCount = config.rankCount || state.rankLabels.length
   const usesAutoRemainder = config.usesAutoRemainder === true
   const autoAfterHouseCount = config.autoAfterHouseCount || fillToRank
+  if (config.kind === 'score-number' || config.kind === 'score-unsigned') {
+    const allowNegative = config.kind === 'score-number'
+    const values = Array.from({ length: rankCount }, (_, rowIndex) => {
+      const raw = draft[rowIndex]?.[roundIndex] ?? ''
+      return normalizeScoreText(raw, allowNegative)
+    })
+    const hasInvalid = Array.from({ length: rankCount }, (_, rowIndex) => draft[rowIndex]?.[roundIndex] ?? '')
+      .some(raw => String(raw).trim() && !normalizeScoreText(raw, allowNegative))
+    if (hasInvalid) return {
+      ok: false,
+      message: allowNegative
+        ? 'Money Drop accepts numbers only. Use - for lost money, for example -500.'
+        : 'Snake Ladder accepts unsigned integers only.',
+      values,
+    }
+    return { ok: true, values }
+  }
   const normalized = Array.from({ length: rankCount }, (_, rowIndex) => {
     const raw = draft[rowIndex]?.[roundIndex] ?? ''
     return normalizeHouseText(raw, config.allowTies)
@@ -530,6 +564,8 @@ export default function FormPage() {
   const visibleRounds = currentState
     ? currentState.rounds.slice(0, currentState.form.maxRounds || currentState.rounds.length)
     : []
+  const isScoreNumberForm = currentState?.form.kind === 'score-number'
+  const isScoreInputForm = currentState?.form.kind === 'score-number' || currentState?.form.kind === 'score-unsigned'
   const usesAutoRemainder = currentState?.form.usesAutoRemainder === true
   const showAutoControls = Boolean(currentState && usesAutoRemainder)
   const effectiveSelectedAutoRow = usesAutoRemainder ? selectedAutoRow : -1
@@ -723,7 +759,7 @@ export default function FormPage() {
                   <table className="form-score-table">
                     <thead>
                       <tr>
-                        <th>Rank</th>
+                        <th>{isScoreInputForm ? 'บ้าน' : 'Rank'}</th>
                         {visibleRounds.map((round, roundIndex) => (
                           <th key={round.index} className={clsx(selectedRound === roundIndex && 'active-round')}>
                             <div>{round.label || `Round ${round.index}`}</div>
@@ -735,7 +771,7 @@ export default function FormPage() {
                     <tbody>
                       {visibleRankLabels.map((label, rowIndex) => (
                         <tr key={`${label}-${rowIndex}`} className={clsx(rowIndex === effectiveSelectedAutoRow && 'auto-row')}>
-                          <th>{label || `Rank ${rowIndex + 1}`}</th>
+                          <th>{isScoreInputForm ? (label || `บ้าน ${rowIndex + 1}`) : (label || `Rank ${rowIndex + 1}`)}</th>
                           {visibleRounds.map((round, roundIndex) => {
                             const editable = Boolean(session && (isAdmin || (!round.confirmed && !round.locked && !(round.deadlineAt && Date.now() > new Date(round.deadlineAt).getTime()))))
                             const isAuto = usesAutoRemainder && rowIndex === fillToRank
@@ -748,10 +784,11 @@ export default function FormPage() {
                               <td key={`${round.index}-${rowIndex}`} className={clsx(selectedRound === roundIndex && 'active-round')}>
                                 <input
                                   value={isAuto ? autoValue : draft[rowIndex]?.[roundIndex] ?? ''}
-                                  onChange={event => updateCell(rowIndex, roundIndex, event.target.value)}
-                                  onBlur={event => updateCell(rowIndex, roundIndex, normalizeHouseText(event.target.value, currentState.form.allowTies))}
+                                  onChange={event => updateCell(rowIndex, roundIndex, isScoreInputForm ? sanitizeScoreInput(event.target.value, isScoreNumberForm) : event.target.value)}
+                                  onBlur={event => updateCell(rowIndex, roundIndex, isScoreInputForm ? normalizeScoreText(event.target.value, isScoreNumberForm) : normalizeHouseText(event.target.value, currentState.form.allowTies))}
                                   disabled={!editable || isAuto}
                                   className={clsx(isAuto && 'auto-input')}
+                                  inputMode={isScoreInputForm ? 'numeric' : undefined}
                                 />
                               </td>
                             )
@@ -801,6 +838,13 @@ export default function FormPage() {
                     </tfoot>
                   </table>
                 </div>
+                {isScoreNumberForm && (
+                  <div className="form-score-note">
+                    <strong>หมายเหตุ</strong>
+                    <span>ถ้าเสียใส่ - เช่น -500</span>
+                    <span>ถ้าบวก ใส่แค่เลข</span>
+                  </div>
+                )}
               </div>
             )}
           </section>

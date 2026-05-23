@@ -6,7 +6,7 @@ export const FORM_SPREADSHEET_BY_TAB: Record<string, string> = {
   'Games บ่าย': '17aDGTgeB1xIwXBPrbU0Fd5hXr3Qw_zSu1OZkas3EgZs',
 }
 
-export type FormKind = 'ranking-group' | 'ranking-single' | 'match-single' | 'placeholder'
+export type FormKind = 'ranking-group' | 'ranking-single' | 'match-single' | 'score-number' | 'score-unsigned' | 'placeholder'
 export type FormRole = 'staff' | 'admin'
 
 export interface ScoringFormConfig {
@@ -62,11 +62,20 @@ export function inferFormKind(
   user: string
 ): Pick<ScoringFormConfig, 'kind' | 'defaultFillToRank' | 'allowTies' | 'blank' | 'rankCount' | 'maxRounds' | 'usesAutoRemainder' | 'autoAfterHouseCount'> {
   const normalized = user.toLowerCase().replace(/\s+/g, ' ').trim()
-  if (['event', 'snake ladder', 'money drop'].includes(normalized)) {
+  if (normalized === 'money drop') {
+    return { kind: 'score-number', defaultFillToRank: 1, allowTies: false, blank: false, rankCount: 12, maxRounds: 4, usesAutoRemainder: false, autoAfterHouseCount: 0 }
+  }
+  if (normalized === 'snake ladder') {
+    return { kind: 'score-unsigned', defaultFillToRank: 1, allowTies: false, blank: false, rankCount: 12, maxRounds: 4, usesAutoRemainder: false, autoAfterHouseCount: 0 }
+  }
+  if (normalized === 'event') {
     return { kind: 'placeholder', defaultFillToRank: 0, allowTies: false, blank: true, rankCount: 0, maxRounds: 0, usesAutoRemainder: false, autoAfterHouseCount: 0 }
   }
   if (normalized.includes('dodge ball') || normalized.includes('territory control')) {
     return { kind: 'match-single', defaultFillToRank: 1, allowTies: false, blank: false, rankCount: 2, maxRounds: 6, usesAutoRemainder: false, autoAfterHouseCount: 0 }
+  }
+  if (normalized.includes('escape') && tab === 'เช้าบน') {
+    return { kind: 'ranking-single', defaultFillToRank: 6, allowTies: false, blank: false, rankCount: 6, maxRounds: 7, usesAutoRemainder: false, autoAfterHouseCount: 0 }
   }
   if (normalized.includes('stacking block') || normalized.includes('escape')) {
     return { kind: 'ranking-single', defaultFillToRank: 4, allowTies: false, blank: false, rankCount: 4, maxRounds: 6, usesAutoRemainder: false, autoAfterHouseCount: 0 }
