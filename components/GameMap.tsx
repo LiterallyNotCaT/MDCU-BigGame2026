@@ -57,13 +57,6 @@ function GameMap({
 
   return (
     <div className={clsx('game-map select-none', compact ? 'game-map-compact' : 'game-map-regular')}>
-      {/* Filter notice */}
-      {filterDisaster != null && (
-        <div className="toast-lift flex items-center gap-2 px-3 py-2 rounded-2xl bg-indigo-900 border border-yellow-300 text-xs text-white shadow-[0_18px_45px_rgba(49,46,129,0.30)]">
-          <span className="font-mono font-bold">D{filterDisaster}</span>
-          <span>Showing areas affected by disaster {filterDisaster}</span>
-        </div>
-      )}
       {kingDisaster != null && !filterDisaster && (
         <div className="map-king-disaster-notice">
           <span>King บ้าน {currentKing ?? '-'} เลือก disaster {kingDisaster}</span>

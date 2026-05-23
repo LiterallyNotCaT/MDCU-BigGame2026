@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import clsx from 'clsx'
-import { CheckCircle2, Clock, FileSpreadsheet, KeyRound, Lock, RefreshCw, Send, Settings2, ShieldCheck, Unlock } from 'lucide-react'
+import { CheckCircle2, Clock, FileSpreadsheet, KeyRound, Lock, RefreshCw, Send, ShieldCheck, Unlock } from 'lucide-react'
 import ContactFooter from '@/components/ContactFooter'
 import GroupChat from '@/components/GroupChat'
 import HomeButton from '@/components/HomeButton'
@@ -24,6 +24,43 @@ type Session = {
 }
 
 const FORM_TABS = ['เช้าล่าง', 'เช้าบน', 'Games บ่าย']
+const FORM_SESSION_STORAGE_KEY = 'biggame_form_sessions_v1'
+
+type StoredFormSession = {
+  sessions: Record<string, Session>
+  adminSession: Session | null
+  tab: string
+  formKey: string
+}
+
+function isSession(value: unknown): value is Session {
+  if (!value || typeof value !== 'object') return false
+  const session = value as Record<string, unknown>
+  return (session.role === 'staff' || session.role === 'admin')
+    && typeof session.username === 'string'
+    && typeof session.password === 'string'
+}
+
+function readStoredFormSession(): StoredFormSession | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.localStorage.getItem(FORM_SESSION_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<StoredFormSession>
+    const sessions = Object.entries(parsed.sessions ?? {}).reduce<Record<string, Session>>((next, [key, value]) => {
+      if (isSession(value)) next[key] = value
+      return next
+    }, {})
+    return {
+      sessions,
+      adminSession: isSession(parsed.adminSession) ? parsed.adminSession : null,
+      tab: typeof parsed.tab === 'string' ? parsed.tab : '',
+      formKey: typeof parsed.formKey === 'string' ? parsed.formKey : '',
+    }
+  } catch {
+    return null
+  }
+}
 
 function groupByTab(forms: ScoringFormConfig[]) {
   return forms.reduce<Record<string, ScoringFormConfig[]>>((groups, form) => {
@@ -129,6 +166,7 @@ export default function FormPage() {
   const [passwordInput, setPasswordInput] = useState('')
   const [adminInput, setAdminInput] = useState('')
   const [showAdminLogin, setShowAdminLogin] = useState(false)
+  const [sessionsRestored, setSessionsRestored] = useState(false)
   const [loadingConfig, setLoadingConfig] = useState(true)
   const [loadingState, setLoadingState] = useState(false)
   const [stateLoadError, setStateLoadError] = useState('')
@@ -141,13 +179,16 @@ export default function FormPage() {
   const currentState = currentForm && state?.form.formKey === currentForm.formKey ? state : null
   const reportTargets = useMemo(() => {
     const seen = new Set<string>()
-    return forms.flatMap(form => {
+    const targetForms = tab === FORM_TABS[2]
+      ? forms.filter(form => form.tab === FORM_TABS[2])
+      : forms.filter(form => form.tab !== FORM_TABS[2])
+    return targetForms.flatMap(form => {
       const value = staffChatName(form.user)
       if (seen.has(value)) return []
       seen.add(value)
       return [{ value, label: value }]
     })
-  }, [forms])
+  }, [forms, tab])
   const session = currentForm ? adminSession ?? sessions[currentForm.formKey] ?? null : adminSession
   const canSeeContent = Boolean(currentForm && (adminSession || sessions[currentForm.formKey]))
   const canLoadSelectedForm = Boolean(formKey && (adminSession || sessions[formKey]))
@@ -202,6 +243,36 @@ export default function FormPage() {
     setStatesByFormKey(prev => ({ ...prev, ...nextStates }))
     return nextStates
   }, [formKeysForTab])
+
+  useEffect(() => {
+    const stored = readStoredFormSession()
+    if (stored) {
+      setSessions(stored.sessions)
+      setAdminSession(stored.adminSession)
+      if (stored.tab) setTab(stored.tab)
+      if (stored.formKey) setFormKey(stored.formKey)
+    }
+    setSessionsRestored(true)
+  }, [])
+
+  useEffect(() => {
+    if (!sessionsRestored) return
+    const hasLogin = Boolean(adminSession) || Object.keys(sessions).length > 0
+    try {
+      if (!hasLogin) {
+        window.localStorage.removeItem(FORM_SESSION_STORAGE_KEY)
+        return
+      }
+      window.localStorage.setItem(FORM_SESSION_STORAGE_KEY, JSON.stringify({
+        sessions,
+        adminSession,
+        tab,
+        formKey,
+      }))
+    } catch {
+      // Ignore storage failures; login still works for this page session.
+    }
+  }, [adminSession, formKey, sessions, sessionsRestored, tab])
 
   const refreshState = useCallback(async (nextFormKey = formKey, options?: { force?: boolean }) => {
     if (!nextFormKey) return
@@ -643,9 +714,6 @@ export default function FormPage() {
                       </button>
                       <button type="button" disabled={controlBusy} onClick={() => setRoundControl(selectedRound, { confirmed: false, locked: false })} className="btn btn-ghost">
                         Edit again
-                      </button>
-                      <button type="button" disabled={controlBusy} onClick={() => setRoundControl(selectedRound, { deadlineMinutes: 10 })} className="btn btn-ghost">
-                        <Settings2 size={13} /> +10 min
                       </button>
                     </div>
                   )}

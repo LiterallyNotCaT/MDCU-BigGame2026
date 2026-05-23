@@ -4342,29 +4342,22 @@ form .btn.w-full {
   gap: 7px;
 }
 .wire-page-full .wire-pill-row-bet {
-  display: grid;
-  grid-template-columns: minmax(120px, 0.28fr) auto minmax(180px, 1fr) auto minmax(28px, 0.08fr);
+  display: flex;
+  width: 100%;
+  max-width: 760px;
+  margin-inline: auto;
   align-items: center;
+  justify-content: space-between;
 }
 .wire-page-full .wire-pill-row-bet .wire-pill-status-group {
-  grid-column: 2;
-  justify-self: start;
   flex-wrap: nowrap;
 }
 .wire-page-full .wire-pill-row-bet .wire-bet-logout {
-  grid-column: 4;
-  justify-self: start;
-  margin-left: 0 !important;
+  margin-left: auto !important;
 }
 @media (max-width: 900px) {
-  .wire-page-full .wire-pill-row-bet {
-    display: flex;
-  }
   .wire-page-full .wire-pill-row-bet .wire-pill-status-group {
     flex-wrap: wrap;
-  }
-  .wire-page-full .wire-pill-row-bet .wire-bet-logout {
-    margin-left: auto !important;
   }
 }
 .wire-layout-bidding .badge {

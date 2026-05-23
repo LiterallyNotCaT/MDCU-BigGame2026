@@ -195,6 +195,18 @@ export default function GroupChat({
   const reportStaffOptions = useMemo(() => {
     const seen = new Set<string>()
     const options = new Map<string, string>()
+    const allowedTargets = new Set(
+      reportTargets
+        .map(option => String(option.value || '').trim())
+        .filter(Boolean)
+    )
+    const hasTargetLimit = allowedTargets.size > 0
+    const addOption = (value: string) => {
+      if (!value || value === 'admin' || value === 'public') return
+      if (hasTargetLimit && !allowedTargets.has(value)) return
+      seen.add(value)
+      if (!options.has(value)) options.set(value, targetLabel(value))
+    }
     reportTargets.forEach(option => {
       const value = String(option.value || '').trim()
       if (!value || value.toLowerCase() === 'admin' || value === 'public') return
@@ -206,12 +218,10 @@ export default function GroupChat({
       const sender = senderTarget(message)
       const target = message.sendTo || ''
       if (sender && sender !== 'admin') {
-        seen.add(sender)
-        if (!options.has(sender)) options.set(sender, targetLabel(sender))
+        addOption(sender)
       }
       if (target && target !== 'admin' && target !== 'public') {
-        seen.add(target)
-        if (!options.has(target)) options.set(target, targetLabel(target))
+        addOption(target)
       }
     })
     return Array.from(seen).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))

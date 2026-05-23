@@ -730,16 +730,13 @@ function BiddingGame({ baan }: { baan:number }) {
           <section className={clsx('wire-layout-bidding', isBetMode && 'wire-layout-bet-only')}>
             <div id="bidding-main-fullscreen" className="space-y-3 fullscreen-scope">
               <FullscreenButton targetId="bidding-main-fullscreen" />
-              {!isBetMode && <div className="flex flex-wrap gap-2">
-                <span className={clsx('badge', !isBetMode ? 'badge-blue' : 'badge-green')}>
-                  {isSelectDisasterPhase ? 'Select disaster' : 'เลือกได้สูงสุด 3 พื้นที่'}
-                </span>
-                {isSelectDisasterPhase && (
+              {!isBetMode && isSelectDisasterPhase && (
+                <div className="flex flex-wrap gap-2">
                   <span className={clsx('badge', canChooseKingDisaster ? 'badge-gold' : 'badge-red')}>
                     {canChooseKingDisaster ? 'You are choosing disaster' : 'King is choosing disaster'}
                   </span>
-                )}
-              </div>}
+                </div>
+              )}
               <div className="wire-panel wire-panel-soft">
                 <div className="wire-panel-body">
                   {!gs.isOpen && (
