@@ -21,7 +21,6 @@ const GROUPS = [
   { id:'C', areas:['C1','C2','C3','C4','C5','C6','C7','C8','C9'], income:'140%', dis:'70%' },
   { id:'D', areas:['KING'],                                 income:'King', dis:'choose D' },
 ]
-const GROUP_COLORS = { A: '#38bdf8', B: '#a78bfa', C: '#34d399', D: '#f59e0b' }
 
 function getAreaDisasters(area: string): number[] {
   if (area === 'KING') return []
@@ -75,16 +74,11 @@ function GameMap({
       {/* Map groups */}
       <div className="map-infographic map-unified-board">
       {GROUPS.map(group => {
-        const gc = GROUP_COLORS[group.id as 'A'|'B'|'C'|'D']
         return (
           <div key={group.id} className="map-group-card">
             {/* Group label */}
             <div className="map-group-header">
-              <div className="w-7 h-7 rounded-xl flex items-center justify-center font-display font-bold text-xs"
-                style={{ background: `linear-gradient(135deg, ${gc}30, rgba(255,255,255,0.04))`, color: gc, border: `1px solid ${gc}45`, boxShadow: `0 0 18px ${gc}20` }}>
-                {group.id}
-              </div>
-              <div className="min-w-0">
+              <div className="map-group-copy min-w-0">
                 <span className="font-display font-semibold text-sm text-slate-200">Group {group.id}</span>
                 <div className="map-group-meta">
                   <span className="badge badge-green text-green-500" style={{ fontSize: '0.55rem' }}>+{group.income}</span>

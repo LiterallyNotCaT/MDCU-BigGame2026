@@ -4121,6 +4121,39 @@ form .btn.w-full {
   font-weight: 800;
 }
 
+.form-page .form-shell,
+.form-page .form-workspace {
+  isolation: isolate;
+}
+.form-page .form-workspace {
+  display: grid;
+  gap: 12px;
+  overflow: hidden;
+}
+.form-page .form-table-header,
+.form-page .form-round-toolbar,
+.form-page .form-settings-row,
+.form-page .form-table-wrap {
+  position: relative;
+  z-index: 1;
+}
+.form-page .form-table-header,
+.form-page .form-round-toolbar,
+.form-page .form-settings-row {
+  margin: 0;
+}
+.form-page .form-round-toolbar {
+  min-height: 40px;
+  align-content: start;
+}
+.form-page .form-table-wrap {
+  contain: paint;
+  transform: translateZ(0);
+}
+.form-page .form-subtabs {
+  overflow-y: hidden;
+}
+
 .form-page .btn,
 .form-subtab,
 .form-round-chip,
@@ -4270,6 +4303,138 @@ form .btn.w-full {
   max-height: none !important;
   overflow: visible !important;
 }
+
+/* Bidding page polish */
+.wire-page-full .wire-pill-row {
+  gap: clamp(8px, 1vw, 14px);
+}
+.wire-pill-status-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: clamp(8px, 1vw, 14px);
+}
+.wire-page-full .wire-pill,
+.wire-page-full .group-chat-trigger {
+  min-height: 34px;
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-size: 0.82rem;
+  line-height: 1;
+}
+.wire-page-full .group-chat-trigger {
+  gap: 7px;
+}
+.wire-page-full .wire-pill-row-bet {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.28fr) auto minmax(180px, 1fr) auto minmax(28px, 0.08fr);
+  align-items: center;
+}
+.wire-page-full .wire-pill-row-bet .wire-pill-status-group {
+  grid-column: 2;
+  justify-self: start;
+  flex-wrap: nowrap;
+}
+.wire-page-full .wire-pill-row-bet .wire-bet-logout {
+  grid-column: 4;
+  justify-self: start;
+  margin-left: 0 !important;
+}
+@media (max-width: 900px) {
+  .wire-page-full .wire-pill-row-bet {
+    display: flex;
+  }
+  .wire-page-full .wire-pill-row-bet .wire-pill-status-group {
+    flex-wrap: wrap;
+  }
+  .wire-page-full .wire-pill-row-bet .wire-bet-logout {
+    margin-left: auto !important;
+  }
+}
+.wire-layout-bidding .badge {
+  border-radius: 999px;
+  padding: 4px 9px;
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
+}
+.wire-layout-bidding .wire-panel {
+  border-color: #d7e2f0;
+  border-radius: 16px;
+}
+.wire-layout-bidding .wire-panel-body {
+  padding: clamp(10px, 1vw, 14px) !important;
+}
+.wire-side-panel {
+  border-radius: 16px !important;
+}
+.wire-side-panel .flex.flex-col.h-full {
+  gap: 11px;
+  padding: 13px;
+}
+.bidding-cart-header {
+  border-bottom: 1px solid #e2e8f0;
+  padding-bottom: 10px;
+}
+.wire-side-panel .cart-card {
+  border-radius: 14px !important;
+}
+.wire-side-panel .bidding-cart-scroll {
+  padding-right: 2px;
+}
+.wire-side-panel .input-base {
+  min-height: 36px;
+  border-radius: 10px;
+  font-size: 0.9rem;
+}
+.wire-side-panel .action-pill,
+.wire-side-panel .btn {
+  border-radius: 10px;
+}
+.game-map .map-group-card,
+.map-unified-board .map-group-card {
+  grid-template-columns: clamp(96px, 10cqw, 126px) minmax(0, 1fr) !important;
+  gap: 8px !important;
+  padding: 7px 8px !important;
+}
+.game-map .map-group-header,
+.map-unified-board .map-group-header {
+  gap: 0 !important;
+}
+.game-map .map-group-copy,
+.map-unified-board .map-group-copy {
+  display: flex !important;
+  min-width: 0 !important;
+  flex-direction: column !important;
+  gap: 5px !important;
+}
+.game-map .map-group-copy > span {
+  color: #334155 !important;
+  font-size: 0.74rem !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+}
+.game-map .map-group-meta {
+  gap: 4px !important;
+}
+.game-map .map-group-meta .badge {
+  padding: 2px 5px !important;
+  font-size: 0.48rem !important;
+  line-height: 1 !important;
+}
+.game-map .map-tile-grid,
+.map-unified-board .map-tile-grid {
+  --map-tile-size: clamp(43px, min(calc((100cqw - 178px) / 9), calc((100svh - 326px) / 4.2)), 74px);
+  gap: 7px !important;
+}
+.game-map .map-tile-deluxe,
+.map-unified-board .map-tile-deluxe {
+  border-radius: 10px !important;
+  padding: 9px 3px 12px !important;
+}
+.game-map .map-tile-area {
+  font-size: clamp(0.78rem, 0.95vw, 1rem) !important;
+}
+
 .bidding-result-toast-region {
   position: fixed;
   top: 86px;

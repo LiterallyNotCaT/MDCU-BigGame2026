@@ -445,7 +445,14 @@ function handleAuthFormUser(payload) {
   const form = findFormConfig_(payload.formKey, true)
   if (!form) return { status: 'error', ok: false, message: 'Form not found' }
   if (!form.password || password !== form.password) return { status: 'error', ok: false, message: 'Wrong password' }
-  return { status: 'ok', ok: true, role: 'staff', username: form.user, formKey: form.formKey }
+  return {
+    status: 'ok',
+    ok: true,
+    role: 'staff',
+    username: form.user,
+    formKey: form.formKey,
+    state: form.blank ? null : readFormState_(form),
+  }
 }
 
 function formControlKey_(formKey) {

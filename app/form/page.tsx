@@ -97,15 +97,18 @@ function validatedColumn(
   return { ok: true, values: normalized }
 }
 
-async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
+async function fetchJson<T>(url: string, init?: RequestInit & { timeoutMs?: number }): Promise<T> {
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), init?.timeoutMs ?? 45000)
   const res = await fetch(url, {
     ...init,
+    signal: init?.signal ?? controller.signal,
     cache: 'no-store',
     headers: {
       'Content-Type': 'application/json',
       ...(init?.headers ?? {}),
     },
-  })
+  }).finally(() => window.clearTimeout(timeout))
   const data = await res.json().catch(() => ({}))
   if (!res.ok || data?.ok === false) throw new Error(data?.message || `Request failed: ${res.status}`)
   return data
@@ -128,6 +131,7 @@ export default function FormPage() {
   const [showAdminLogin, setShowAdminLogin] = useState(false)
   const [loadingConfig, setLoadingConfig] = useState(true)
   const [loadingState, setLoadingState] = useState(false)
+  const [stateLoadError, setStateLoadError] = useState('')
   const [savingRound, setSavingRound] = useState<number | null>(null)
   const [controlBusy, setControlBusy] = useState(false)
   const [notice, setNotice] = useState<{ type: 'ok' | 'err' | 'warn'; text: string } | null>(null)
@@ -172,6 +176,7 @@ export default function FormPage() {
   }, [])
 
   const applyFormState = useCallback((nextState: ScoringFormState) => {
+    setStateLoadError('')
     setState(nextState)
     setDraft(blankDraft(nextState))
     setFillToRank(clampFillToRank(nextState.fillToRank || nextState.form.defaultFillToRank))
@@ -205,6 +210,7 @@ export default function FormPage() {
     }
     const selectedForm = forms.find(form => form.formKey === nextFormKey)
     setLoadingState(true)
+    setStateLoadError('')
     try {
       if (adminSession && selectedForm) {
         const loadedStates = await loadAdminStatesForTab(adminSession.password, selectedForm.tab)
@@ -225,7 +231,11 @@ export default function FormPage() {
       applyFormState(data.state)
       setStatesByFormKey(prev => ({ ...prev, [nextFormKey]: data.state }))
     } catch (error) {
-      notify('err', error instanceof Error ? error.message : String(error))
+      const message = error instanceof Error
+        ? (error.name === 'AbortError' ? 'Loading table timed out. Please refresh.' : error.message)
+        : String(error)
+      setStateLoadError(message)
+      notify('err', message)
     } finally {
       setLoadingState(false)
     }
@@ -244,6 +254,7 @@ export default function FormPage() {
     setState(null)
     setDraft([])
     setParticipantsByRound([])
+    setStateLoadError('')
     setSelectedRound(0)
   }, [canLoadSelectedForm, formKey, refreshState])
 
@@ -260,6 +271,12 @@ export default function FormPage() {
         ...prev,
         [currentForm.formKey]: { role: 'staff', username, password: passwordInput },
       }))
+      if (data.state) {
+        applyFormState(data.state)
+        setStatesByFormKey(prev => ({ ...prev, [currentForm.formKey]: data.state! }))
+      } else if (!currentForm.blank) {
+        await refreshState(currentForm.formKey)
+      }
       setPasswordInput('')
       notify('ok', `Logged in as ${username}`)
     } catch (error) {
@@ -556,8 +573,15 @@ export default function FormPage() {
                 <FileSpreadsheet size={26} />
                 <div>{currentForm.user} is left blank for now.</div>
               </div>
-            ) : loadingState || !state ? (
+            ) : loadingState ? (
               <div className="form-empty-state">Loading table...</div>
+            ) : !state ? (
+              <div className="form-empty-state">
+                <div>{stateLoadError || 'Table is not loaded.'}</div>
+                <button type="button" onClick={() => refreshState(currentForm.formKey)} className="btn btn-primary">
+                  <RefreshCw size={14} /> Retry
+                </button>
+              </div>
             ) : (
               <div className="form-workspace">
                 <div className="form-table-header">

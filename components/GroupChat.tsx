@@ -191,6 +191,7 @@ export default function GroupChat({
   const latestSheetIdRef = useRef('')
   const initializedRef = useRef(false)
   const listRef = useRef<HTMLDivElement | null>(null)
+  const chatTitle = label ?? (mode === 'report' ? 'Report' : 'Chat')
   const reportStaffOptions = useMemo(() => {
     const seen = new Set<string>()
     const options = new Map<string, string>()
@@ -439,18 +440,18 @@ export default function GroupChat({
 
   return (
     <>
-      <button type="button" onClick={() => setOpen(true)} className="btn btn-ghost group-chat-trigger" aria-label="Open group chat">
+      <button type="button" onClick={() => setOpen(true)} className="btn btn-ghost group-chat-trigger" aria-label={`Open ${chatTitle}`}>
         <MessageCircle size={15} />
-        {label ?? 'Group chat'}
+        {chatTitle}
         {unread && <span className="group-chat-dot" />}
       </button>
 
       {open && (
-        <div className="group-chat-backdrop" role="dialog" aria-modal="true" aria-label="Group chat">
+        <div className="group-chat-backdrop" role="dialog" aria-modal="true" aria-label={chatTitle}>
           <div className="group-chat-panel">
             <div className="group-chat-header">
               <div>
-                <div className="group-chat-title">Group chat</div>
+                <div className="group-chat-title">{chatTitle}</div>
                 <div className="group-chat-subtitle">{actorLabel(actor)}</div>
               </div>
               <div className="group-chat-header-actions">

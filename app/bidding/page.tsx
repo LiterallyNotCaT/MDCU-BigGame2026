@@ -706,13 +706,15 @@ function BiddingGame({ baan }: { baan:number }) {
 
       <main className="wire-scroll">
         <div className="wire-content">
-          <div className="wire-pill-row">
-            <div className="wire-pill">{isBetMode ? 'Bet game' : 'Bid game'}</div>
-            <div className="wire-pill">Balance : {effectiveBalance.toLocaleString()}</div>
-            {!isBetMode && <div className="wire-pill">King : {currentKing ? HOUSE_NAMES[currentKing] : '-'}</div>}
-            <div className={clsx('badge', gs.isOpen?'badge-green':'badge-red')}>
-              <span className={clsx('status-dot', gs.isOpen?'online':'offline')} />
-              {gs.isOpen?'OPEN':'CLOSED'}
+          <div className={clsx('wire-pill-row', isBetMode && 'wire-pill-row-bet')}>
+            <div className="wire-pill-status-group">
+              <div className="wire-pill">{isBetMode ? 'Bet game' : 'Bid game'}</div>
+              <div className="wire-pill">Balance : {effectiveBalance.toLocaleString()}</div>
+              {!isBetMode && <div className="wire-pill">King : {currentKing ? HOUSE_NAMES[currentKing] : '-'}</div>}
+              <div className={clsx('badge', gs.isOpen?'badge-green':'badge-red')}>
+                <span className={clsx('status-dot', gs.isOpen?'online':'offline')} />
+                {gs.isOpen?'OPEN':'CLOSED'}
+              </div>
             </div>
             {!isBetMode && (
               <div className="ml-auto">
@@ -720,7 +722,7 @@ function BiddingGame({ baan }: { baan:number }) {
               </div>
             )}
             <button onClick={()=>{sessionStorage.removeItem('baan_login');sessionStorage.removeItem('baan_login_token');window.location.reload()}}
-              className={clsx('btn btn-ghost', isBetMode && 'ml-auto')}>
+              className={clsx('btn btn-ghost', isBetMode && 'wire-bet-logout')}>
               <LogOut size={14} /> Logout
             </button>
           </div>
@@ -730,7 +732,7 @@ function BiddingGame({ baan }: { baan:number }) {
               <FullscreenButton targetId="bidding-main-fullscreen" />
               {!isBetMode && <div className="flex flex-wrap gap-2">
                 <span className={clsx('badge', !isBetMode ? 'badge-blue' : 'badge-green')}>
-                  {isSelectDisasterPhase ? 'Select disaster phase' : 'Bid mode: choose up to 3 islands'}
+                  {isSelectDisasterPhase ? 'Select disaster' : 'เลือกได้สูงสุด 3 พื้นที่'}
                 </span>
                 {isSelectDisasterPhase && (
                   <span className={clsx('badge', canChooseKingDisaster ? 'badge-gold' : 'badge-red')}>
@@ -832,7 +834,6 @@ function BiddingGame({ baan }: { baan:number }) {
 
             {!isBetMode && (
               <aside className="wire-panel wire-side-panel">
-                <div className="wire-section-title">พื้นที่ที่เลือก</div>
                 <BiddingCart baan={baan} balance={effectiveBalance} items={cart} isKing={canChooseKingDisaster}
                   kingDisaster={kingDis}
                   onUpdate={handleCartUpdate}

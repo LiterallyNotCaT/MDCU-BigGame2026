@@ -49,6 +49,7 @@ export interface ScoringFormAuth {
   role: FormRole
   username: string
   formKey?: string
+  state?: ScoringFormState
   message?: string
 }
 

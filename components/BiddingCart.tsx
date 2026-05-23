@@ -2,7 +2,7 @@
 import { memo, useEffect, useState } from 'react'
 import clsx from 'clsx'
 import { X, Minus, Plus, ChevronRight } from 'lucide-react'
-import { HOUSE_COLORS, DISASTER_AREAS } from '@/lib/constants'
+import { HOUSE_COLORS } from '@/lib/constants'
 
 interface CartItem { area: string; amount: number }
 
@@ -29,16 +29,6 @@ const DISASTER_IDS = Array.from({ length: 9 }, (_, i) => i + 1)
 
 function sanitizeMoneyInput(value: string) {
   return value.replace(/[^\d]/g, '')
-}
-
-function getAreaDisasters(area: string): number[] {
-  if (area === 'KING') return []
-  const out: number[] = []
-  for (const [num, data] of Object.entries(DISASTER_AREAS)) {
-    const n=parseInt(num); const g=area[0] as 'A'|'B'|'C'; const i=parseInt(area.slice(1))
-    if (data[g]?.includes(i)) out.push(n)
-  }
-  return out
 }
 
 function BiddingCart({
@@ -110,15 +100,15 @@ function BiddingCart({
   return (
     <div className="flex flex-col h-full gap-4 p-4 md:p-5">
 
-      <div className="flex-shrink-0">
-        <p className="text-label">Investment Plan</p>
-        <div className="mt-1 flex items-end justify-between gap-3">
-          <h2 className="font-display text-xl font-bold leading-none text-white">Bid Summary</h2>
+      <div className="bidding-cart-header flex-shrink-0">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="font-display text-lg font-black leading-none text-slate-950">
+            {isDisasterPhase ? 'Disaster' : 'พื้นที่ที่เลือก'}
+          </h2>
           <span className={clsx('badge', isOpen ? (isDisasterPhase ? 'badge-gold' : 'badge-green') : 'badge-red')}>
             {isOpen ? (isDisasterPhase ? 'King turn' : 'Live') : 'Closed'}
           </span>
         </div>
-        <p className="mt-2 text-xs text-slate-500">เลือกพื้นที่ได้สูงสุด 3 พื้นที่</p>
       </div>
 
       {/* ── Balance summary ────────── */}
@@ -193,7 +183,7 @@ function BiddingCart({
       {/* Area list ──────────────── */}
       <div className="flex-1 min-h-0 flex flex-col gap-2 overflow-hidden">
         <div className="flex items-center justify-between px-0.5">
-          <span className="text-label">พื้นที่ที่เลือก <span className="text-blue-500">({items.length})</span></span>
+          <span className="text-label">รายการ <span className="text-blue-500">({items.length})</span></span>
           {items.length > 0 && (
             <button onClick={()=>onUpdate([])}
               disabled={!amountControlsOpen}
@@ -230,10 +220,7 @@ function BiddingCart({
           )}
 
           {items.map(item => {
-            const aDisasters = getAreaDisasters(item.area)
-            const grp        = item.area[0]
             const isKingItem = item.area === 'KING'
-            const rate       = isKingItem ? 'King' : grp==='A'?'180%':grp==='B'?'160%':'140%'
             const maxAmount = maxAmountForArea(item.area)
 
             return (
@@ -245,17 +232,9 @@ function BiddingCart({
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="font-display font-bold text-sm text-white">{isKingItem ? 'KING' : item.area}</span>
-                      <span className={clsx('badge', isKingItem ? 'badge-gold' : 'badge-green')} style={{ fontSize: '0.55rem' }}>{isKingItem ? rate : `+${rate}`}</span>
-                      {aDisasters.map(d => (
-                        <span key={d} className="rounded bg-slate-100 px-1 font-mono text-[10px] font-bold" title={`Disaster #${d}`}>{d}</span>
-                      ))}
+                      <span className="font-display font-black text-base text-slate-950">{isKingItem ? 'KING' : item.area}</span>
+                      {isKingItem && <span className="badge badge-gold" style={{ fontSize: '0.55rem' }}>KING</span>}
                     </div>
-                    {aDisasters.length > 0 && (
-                      <div className="text-2xs text-red-400/60 mt-0.5">
-                        D {aDisasters.join(', ')}
-                      </div>
-                    )}
                   </div>
                   <button onClick={()=>remove(item.area)} disabled={!amountControlsOpen}
                     className="w-7 h-7 rounded-xl bg-red-500/10 text-red-500/60 hover:bg-red-500/20 hover:text-red-300

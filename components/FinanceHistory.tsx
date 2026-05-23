@@ -48,6 +48,9 @@ interface FinanceHistoryProps {
   className?: string
 }
 
+const HIDDEN_RESULTS_NOTICE =
+  'Current wave results are hidden. Previous waves are shown; current balance uses this wave starting money minus submitted spending.'
+
 const parseGViz = (text: string): any[] => {
   const js = text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\)/)?.[1]
   return js ? JSON.parse(js)?.table?.rows ?? [] : []
@@ -534,9 +537,9 @@ function FinanceHistory({
 
   return (
     <div className={clsx('finance-history space-y-3', className)}>
-      {!showResults && (
+      {!showResults && HIDDEN_RESULTS_NOTICE && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
-          Current wave results are hidden. Previous waves are shown; current balance uses this wave starting money minus submitted spending.
+          {HIDDEN_RESULTS_NOTICE}
         </div>
       )}
       {showFilters && (
