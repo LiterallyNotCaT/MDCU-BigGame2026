@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: { default: 'BIGGAME 2025', template: '%s · BIGGAME' },
+  title: { default: 'BIGGAME 2026', template: '%s · BIGGAME' },
   description: 'BigGame Activity Platform — Investment & Strategy Game',
 }
 
