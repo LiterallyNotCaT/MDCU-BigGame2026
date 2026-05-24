@@ -2320,6 +2320,28 @@ form .btn.w-full {
 .auth-submit {
   margin-top: 2px;
 }
+.google-auth-button {
+  justify-content: center;
+  border: 1px solid #cbd8ea !important;
+  background: #fff !important;
+  color: #172033 !important;
+  box-shadow: 0 12px 26px rgba(15,23,42,0.08) !important;
+}
+.google-auth-button:hover {
+  border-color: #93c5fd !important;
+  background: #f8fbff !important;
+  filter: none !important;
+}
+.google-logo {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+}
+.form-login-failed-icon {
+  border-color: rgba(239,68,68,0.28) !important;
+  color: #dc2626;
+  box-shadow: 0 14px 34px rgba(239,68,68,0.18);
+}
 .auth-error {
   margin-block: -2px 0;
   line-height: 1.25;
@@ -3848,6 +3870,33 @@ form .btn.w-full {
 .form-admin-popover .btn {
   min-height: 38px;
   padding: 8px 12px;
+}
+.form-admin-login-button {
+  border-color: rgba(191,219,254,0.72) !important;
+  background: rgba(239,246,255,0.92) !important;
+  color: #1d4ed8 !important;
+}
+.form-admin-login-button:hover {
+  background: #dbeafe !important;
+}
+.form-admin-status-button {
+  border-color: rgba(134,239,172,0.78) !important;
+  background: #f0fdf4 !important;
+  color: #166534 !important;
+}
+.form-admin-status-button:hover {
+  background: #dcfce7 !important;
+}
+.form-logout-button {
+  margin-left: 4px;
+  border-color: rgba(254,202,202,0.86) !important;
+  background: rgba(255,255,255,0.94) !important;
+  color: #b91c1c !important;
+  box-shadow: 0 10px 24px rgba(127,29,29,0.12) !important;
+}
+.form-logout-button:hover {
+  background: #fef2f2 !important;
+  border-color: #fca5a5 !important;
 }
 .form-shell {
   padding: clamp(12px, 1.6vw, 18px);
