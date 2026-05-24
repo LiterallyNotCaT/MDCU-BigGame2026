@@ -10,6 +10,7 @@ import HomeButton from '@/components/HomeButton'
 import {
   canOAuthEditForm,
   canOAuthViewForm,
+  isOAuthBanned,
   isOAuthAdmin,
   type OAuthFormProfile,
 } from '@/lib/formPermissions'
@@ -280,6 +281,10 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     setOauthError('')
     try {
       const data = await fetchJson<{ profile: OAuthFormProfile }>('/api/forms/oauth')
+      if (isOAuthBanned(data.profile)) {
+        window.location.assign('/form/login-failed?reason=banned')
+        return
+      }
       setOauthProfile(data.profile)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)

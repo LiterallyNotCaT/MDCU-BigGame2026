@@ -1,6 +1,6 @@
 import type { ScoringFormConfig } from './forms'
 
-export type OAuthWebRole = 'ADMIN' | 'Head/Prasarn' | 'Core Team' | 'Staff' | 'Viewer'
+export type OAuthWebRole = 'ADMIN' | 'Head/Prasarn' | 'Core Team' | 'Staff' | 'Viewer' | 'Banned'
 
 export interface OAuthFormProfile {
   email: string
@@ -22,6 +22,10 @@ export function normalizeGameKey(value: string) {
 
 export function isOAuthAdmin(profile: OAuthFormProfile | null) {
   return profile?.role === 'ADMIN'
+}
+
+export function isOAuthBanned(profile: OAuthFormProfile | null) {
+  return profile?.role === 'Banned'
 }
 
 export function canOAuthEditForm(profile: OAuthFormProfile | null, form: ScoringFormConfig | null) {

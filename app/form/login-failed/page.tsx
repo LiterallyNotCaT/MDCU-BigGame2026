@@ -1,8 +1,16 @@
 import Link from 'next/link'
 import { AlertTriangle } from 'lucide-react'
 import HomeButton from '@/components/HomeButton'
+import { signOut } from '@/auth'
 
-export default function FormLoginFailedPage() {
+type FormLoginFailedPageProps = {
+  searchParams: Promise<{ reason?: string | string[] }>
+}
+
+export default async function FormLoginFailedPage({ searchParams }: FormLoginFailedPageProps) {
+  const reason = (await searchParams).reason
+  const isBanned = (Array.isArray(reason) ? reason[0] : reason) === 'banned'
+
   return (
     <div className="auth-page min-h-screen app-shell flex items-center justify-center px-4 py-6">
       <div className="pointer-events-none fixed inset-0">
@@ -38,14 +46,29 @@ export default function FormLoginFailedPage() {
         <div className="auth-heading text-center">
           <h1 className="font-display font-black text-slate-950">Login Failed</h1>
           <p className="font-semibold text-slate-500">
-            Please use a verified Google account ending with @docchula.com.
+            {isBanned
+              ? 'This account is not allowed to access the form.'
+              : 'Please use a verified Google account ending with @docchula.com.'}
           </p>
         </div>
 
         <div className="auth-form">
-          <Link href="/form/login" className="btn btn-primary auth-submit w-full">
-            Back to login
-          </Link>
+          {isBanned ? (
+            <form
+              action={async () => {
+                'use server'
+                await signOut({ redirectTo: '/form/login' })
+              }}
+            >
+              <button type="submit" className="btn btn-primary auth-submit w-full">
+                Back to login
+              </button>
+            </form>
+          ) : (
+            <Link href="/form/login" className="btn btn-primary auth-submit w-full">
+              Back to login
+            </Link>
+          )}
         </div>
 
         <div className="auth-home">
