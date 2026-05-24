@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Lock } from 'lucide-react'
 import HomeButton from './HomeButton'
-import { getPagePassword, passwordSessionToken } from '@/lib/passwords'
+import { verifyPagePassword, verifyPasswordSession } from '@/lib/passwords'
 
 interface AuthGuardProps {
   pageKey: string
@@ -20,7 +20,7 @@ export default function AuthGuard({
 }: AuthGuardProps) {
   const [authed, setAuthed] = useState(false)
   const [checking, setChecking] = useState(true)
-  const [passwordReady, setPasswordReady] = useState(false)
+  const [passwordReady, setPasswordReady] = useState(true)
   const [input, setInput] = useState('')
   const [error, setError] = useState(false)
   const [shake, setShake] = useState(false)
@@ -28,15 +28,20 @@ export default function AuthGuard({
   useEffect(() => {
     let cancelled = false
     setChecking(true)
-    getPagePassword(pageKey)
-      .then(async password => {
+    const token = sessionStorage.getItem(`auth_${pageKey}`)
+    if (!token) {
+      setChecking(false)
+      return () => { cancelled = true }
+    }
+    verifyPasswordSession({ kind: 'page', pageKey, token })
+      .then(result => {
         if (cancelled) return
-        setPasswordReady(Boolean(password))
-        if (password && sessionStorage.getItem(`auth_${pageKey}`) === await passwordSessionToken(pageKey, password)) setAuthed(true)
+        if (result.ok) setAuthed(true)
+        else sessionStorage.removeItem(`auth_${pageKey}`)
       })
       .catch(error => {
         console.error(error)
-        if (!cancelled) setPasswordReady(false)
+        if (!cancelled) sessionStorage.removeItem(`auth_${pageKey}`)
       })
       .finally(() => {
         if (!cancelled) setChecking(false)
@@ -53,10 +58,14 @@ export default function AuthGuard({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    const expectedPassword = await getPagePassword(pageKey, true)
-    setPasswordReady(Boolean(expectedPassword))
-    if (expectedPassword && input === expectedPassword) {
-      sessionStorage.setItem(`auth_${pageKey}`, await passwordSessionToken(pageKey, expectedPassword))
+    setPasswordReady(false)
+    const result = await verifyPagePassword(pageKey, input.trim()).catch(error => {
+      console.error(error)
+      return { ok: false, token: undefined, message: String(error) }
+    })
+    setPasswordReady(true)
+    if (result.ok && result.token) {
+      sessionStorage.setItem(`auth_${pageKey}`, result.token)
       setAuthed(true)
     } else {
       setError(true); setShake(true)
@@ -115,7 +124,7 @@ export default function AuthGuard({
               boxShadow: `0 14px 30px ${accentColor}30`,
             }}
           >
-            {passwordReady ? 'เข้าสู่ระบบ' : 'ไม่พบรหัสผ่าน'}
+            {passwordReady ? 'เข้าสู่ระบบ' : 'Checking...'}
           </button>
         </form>
 

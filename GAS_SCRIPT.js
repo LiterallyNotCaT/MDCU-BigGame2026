@@ -18,6 +18,8 @@ const FORM_SPREADSHEETS_BY_TAB = {
   'เช้าล่าง': '1SwwS8hxhZmAwuMF_WZn8QweKmDY-fv5dJg_gMFA1zfs',
   'Games บ่าย': '17aDGTgeB1xIwXBPrbU0Fd5hXr3Qw_zSu1OZkas3EgZs',
 }
+const EVENT_SPREADSHEET_ID = '17aDGTgeB1xIwXBPrbU0Fd5hXr3Qw_zSu1OZkas3EgZs'
+const EVENT_GID = 93487242
 const WAVE_GIDS = {
   1: 1448591830,
 }
@@ -54,8 +56,20 @@ function doPost(e) {
   try {
     const payload = JSON.parse(e.postData.contents)
 
-    if (payload.action === 'writeWave') {
+    if (payload.action === 'authAccess') {
+      const result = handleAuthAccess(payload)
+      output.setContent(JSON.stringify(result))
+    } else if (payload.action === 'writeWave') {
       const result = handleWriteWave(payload)
+      output.setContent(JSON.stringify(result))
+    } else if (payload.action === 'readEventStatus') {
+      const result = handleReadEventStatus(payload)
+      output.setContent(JSON.stringify(result))
+    } else if (payload.action === 'submitEventAnswer') {
+      const result = handleSubmitEventAnswer(payload)
+      output.setContent(JSON.stringify(result))
+    } else if (payload.action === 'setEventSolutionVisible') {
+      const result = handleSetEventSolutionVisible(payload)
       output.setContent(JSON.stringify(result))
     } else if (payload.action === 'writeChat') {
       const result = handleWriteChat(payload)
@@ -249,6 +263,7 @@ const NAMED_LOCK_TTL_BY_NAME = {
   REPORT_CHAT_LOCK: 20000,
   FORM_WRITE_LOCK: 60000,
   WAVE_WRITE_LOCK: 60000,
+  EVENT_LOCK: 60000,
 }
 
 function namedLockTtlMs_(name) {
@@ -320,6 +335,120 @@ function releaseNamedLock_(lockInfo) {
     // Expired named locks self-heal on the next acquire.
   } finally {
     if (guardLocked) guard.releaseLock()
+  }
+}
+
+function accessPasswordCacheKey_() {
+  return 'ACCESS_PASSWORDS_V2'
+}
+
+function pageKeyFromAccessLabel_(label) {
+  const value = String(label || '').toLowerCase()
+  if (value.indexOf('morning') >= 0) return 'web1'
+  if (value.indexOf('afternoon') >= 0) return 'web2'
+  if (value.indexOf('ambassador') >= 0) return 'web4'
+  if (value.indexOf('admin') >= 0) return 'web5'
+  return ''
+}
+
+function readAccessPasswordConfig_() {
+  const cached = cacheGetJson_(accessPasswordCacheKey_())
+  if (cached && cached.pages && cached.baans) return cached
+
+  const sheet = getPasswordSheet_()
+  if (!sheet) throw new Error(`Password sheet gid ${PASSWORD_GID} not found`)
+
+  const rows = sheet.getRange('A1:B25').getDisplayValues()
+  const pages = {
+    web1: String(rows[1] && rows[1][1] || '').trim(),
+    web2: String(rows[2] && rows[2][1] || '').trim(),
+    web4: String(rows[3] && rows[3][1] || '').trim(),
+    web5: String(rows[4] && rows[4][1] || '').trim(),
+  }
+  const baans = {}
+  let kingPro = String(rows[24] && rows[24][1] || '').trim()
+
+  rows.forEach(row => {
+    const left = String(row && row[0] || '').trim()
+    const password = String(row && row[1] || '').trim()
+    if (!left || !password) return
+    const pageKey = pageKeyFromAccessLabel_(left)
+    if (pageKey) {
+      pages[pageKey] = password
+      return
+    }
+    const normalizedLeft = left.toLowerCase().replace(/\s+/g, '')
+    if (normalizedLeft.indexOf('king') >= 0 && normalizedLeft.indexOf('pro') >= 0) {
+      kingPro = password
+      return
+    }
+    const baan = Number(left)
+    if (baan >= 1 && baan <= 12) baans[String(baan)] = password
+  })
+
+  for (let baan = 1; baan <= 12; baan++) {
+    const rowIndex = 8 + baan
+    const password = String(rows[rowIndex] && rows[rowIndex][1] || '').trim()
+    if (password) baans[String(baan)] = password
+  }
+
+  const config = { pages, baans, kingPro }
+  cachePutJson_(accessPasswordCacheKey_(), config, FORM_CONFIG_PRIVATE_CACHE_SECONDS)
+  return config
+}
+
+function accessScopeAndPassword_(payload) {
+  const kind = String(payload.kind || '').trim()
+  const config = readAccessPasswordConfig_()
+  if (kind === 'page') {
+    const pageKey = String(payload.pageKey || '').trim()
+    if (!/^web[1245]$/.test(pageKey)) return null
+    return { scope: `page:${pageKey}`, password: String(config.pages[pageKey] || '') }
+  }
+  if (kind === 'baan') {
+    const baan = Number(payload.baan)
+    if (!Number.isInteger(baan) || baan < 1 || baan > 12) return null
+    return { scope: `baan:${baan}`, password: String(config.baans[String(baan)] || '') }
+  }
+  if (kind === 'kingPro') {
+    return { scope: 'ambassador:king-pro', password: String(config.kingPro || '') }
+  }
+  return null
+}
+
+function accessSessionToken_(scope, password) {
+  const raw = `${scope}:${password}:biggame-access-v2`
+  const digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, raw, Utilities.Charset.UTF_8)
+  return digest.map(byte => {
+    const value = byte < 0 ? byte + 256 : byte
+    return value.toString(16).padStart(2, '0')
+  }).join('')
+}
+
+function verifyAccessToken_(payload) {
+  const info = accessScopeAndPassword_(payload)
+  if (!info || !info.password) return false
+  const token = String(payload.token || '').trim()
+  return Boolean(token) && token === accessSessionToken_(info.scope, info.password)
+}
+
+function handleAuthAccess(payload) {
+  const info = accessScopeAndPassword_(payload)
+  if (!info || !info.password) return { status: 'ok', ok: false, message: 'Password is not configured' }
+
+  if (String(payload.mode || 'login') === 'session') {
+    return {
+      status: 'ok',
+      ok: verifyAccessToken_(payload),
+    }
+  }
+
+  const submitted = String(payload.password || '')
+  if (submitted !== info.password) return { status: 'ok', ok: false, message: 'Wrong password' }
+  return {
+    status: 'ok',
+    ok: true,
+    token: accessSessionToken_(info.scope, info.password),
   }
 }
 
@@ -808,9 +937,198 @@ function handleSetFormRoundControl(payload) {
   }
 }
 
+function eventWaveConfig_(wave) {
+  const n = Number(wave)
+  if (n === 2) return { wave: 2, answerCol: 22, timeCol: 22, rankCol: 15 }
+  if (n === 4) return { wave: 4, answerCol: 23, timeCol: 23, rankCol: 16 }
+  return null
+}
+
+function eventSolutionKey_(wave) {
+  return `EVENT_SOLUTION_VISIBLE_W${Number(wave)}`
+}
+
+function openEventSheet_() {
+  const ss = SpreadsheetApp.openById(EVENT_SPREADSHEET_ID)
+  const sheet = getSheetByGid_(ss, EVENT_GID)
+  if (!sheet) throw new Error(`Event sheet gid ${EVENT_GID} not found`)
+  return sheet
+}
+
+function normalizeEventAnswer_(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+}
+
+function eventAnswerOptions_(value) {
+  return String(value || '')
+    .split(/[\n,|/]+/)
+    .map(normalizeEventAnswer_)
+    .filter(Boolean)
+}
+
+function eventTimeValue_(value) {
+  if (value instanceof Date) return value.getTime()
+  if (typeof value === 'number') return value
+  const parsed = Date.parse(String(value || ''))
+  return Number.isFinite(parsed) ? parsed : NaN
+}
+
+function normalizeEventImageUrl_(value) {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+
+  let url = raw
+  const imageFormula = raw.match(/=\s*IMAGE\s*\(\s*["']([^"']+)["']/i)
+  const hyperlinkFormula = raw.match(/=\s*HYPERLINK\s*\(\s*["']([^"']+)["']/i)
+  if (imageFormula && imageFormula[1]) url = imageFormula[1].trim()
+  else if (hyperlinkFormula && hyperlinkFormula[1]) url = hyperlinkFormula[1].trim()
+
+  const driveIdMatch =
+    url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) ||
+    url.match(/[?&]id=([a-zA-Z0-9_-]+)/)
+  if (/drive\.google\.com|docs\.google\.com/.test(url) && driveIdMatch && driveIdMatch[1]) {
+    return `https://drive.google.com/thumbnail?id=${driveIdMatch[1]}&sz=w2000`
+  }
+
+  return url
+}
+
+function eventImageUrlFromRange_(range) {
+  const richText = range.getRichTextValue()
+  let linkUrl = richText && richText.getLinkUrl ? richText.getLinkUrl() : ''
+  if (!linkUrl && richText && richText.getRuns) {
+    const runs = richText.getRuns()
+    for (let i = 0; i < runs.length; i += 1) {
+      const runLink = runs[i].getLinkUrl ? runs[i].getLinkUrl() : ''
+      if (runLink) {
+        linkUrl = runLink
+        break
+      }
+    }
+  }
+  const formula = range.getFormula ? range.getFormula() : ''
+  const display = range.getDisplayValue()
+  return normalizeEventImageUrl_(linkUrl || formula || display)
+}
+
+function isEventSolutionVisible_(wave) {
+  return PropertiesService.getScriptProperties().getProperty(eventSolutionKey_(wave)) === 'true'
+}
+
+function rankEventAnswers_(sheet, config) {
+  const values = sheet.getRange(8, config.timeCol, 12, 1).getValues()
+  const ranked = values
+    .map((row, index) => ({
+      baan: index + 1,
+      time: eventTimeValue_(row[0]),
+    }))
+    .filter(item => Number.isFinite(item.time))
+    .sort((a, b) => a.time - b.time || a.baan - b.baan)
+
+  const rankValues = Array.from({ length: 12 }, (_, index) => [ranked[index] ? ranked[index].baan : ''])
+  sheet.getRange(8, config.rankCol, 12, 1).setValues(rankValues)
+  return ranked.map((item, index) => ({ rank: index + 1, baan: item.baan }))
+}
+
+function readEventStatus_(wave, options) {
+  const config = eventWaveConfig_(wave)
+  if (!config) return { status: 'error', message: 'Event is available only in wave 2 or wave 4' }
+  const includeSolutionImage = options && options.includeSolutionImage === true
+  const sheet = openEventSheet_()
+  const rankRows = sheet.getRange(8, config.rankCol, 12, 1).getDisplayValues()
+  const timeRows = sheet.getRange(8, config.timeCol, 12, 1).getDisplayValues()
+  const results = rankRows
+    .map((row, index) => ({
+      rank: index + 1,
+      baan: Number(row[0]),
+    }))
+    .filter(item => Number.isInteger(item.baan) && item.baan >= 1 && item.baan <= 12)
+  const submitted = timeRows
+    .map((row, index) => ({ baan: index + 1, time: String(row[0] || '').trim() }))
+    .filter(item => item.time)
+  const questionImage = eventImageUrlFromRange_(sheet.getRange(21, config.answerCol))
+  const solutionVisible = isEventSolutionVisible_(config.wave)
+  const solutionImage = includeSolutionImage && solutionVisible
+    ? eventImageUrlFromRange_(sheet.getRange(22, config.answerCol))
+    : ''
+
+  return {
+    status: 'ok',
+    wave: config.wave,
+    questionImage,
+    solutionImage,
+    questionReady: Boolean(questionImage),
+    solutionVisible,
+    results,
+    submitted,
+  }
+}
+
+function handleReadEventStatus(payload) {
+  return readEventStatus_(payload.wave, { includeSolutionImage: payload.includeSolutionImage === true })
+}
+
+function handleSubmitEventAnswer(payload) {
+  const config = eventWaveConfig_(payload.wave)
+  if (!config) return { status: 'error', message: 'Event is available only in wave 2 or wave 4' }
+  const baan = Number(payload.baan)
+  if (!Number.isInteger(baan) || baan < 1 || baan > 12) return { status: 'error', message: 'Invalid house' }
+  if (!verifyAccessToken_({ kind: 'baan', baan, token: payload.token })) return { status: 'error', message: 'Unauthorized' }
+
+  const answer = normalizeEventAnswer_(payload.answer)
+  if (!answer) return { status: 'error', message: 'Answer is blank' }
+
+  let lock = null
+  try {
+    lock = acquireNamedLock_('EVENT_LOCK', 45000)
+    const sheet = openEventSheet_()
+    const row = 7 + baan
+
+    const correctOptions = eventAnswerOptions_(sheet.getRange(20, config.answerCol).getDisplayValue())
+    if (!correctOptions.length) return { status: 'error', message: 'Correct answer is not configured' }
+    if (correctOptions.indexOf(answer) < 0) {
+      return { status: 'ok', correct: false, message: 'Wrong answer' }
+    }
+
+    const existing = sheet.getRange(row, config.timeCol).getValue()
+    if (eventTimeValue_(existing)) {
+      const results = rankEventAnswers_(sheet, config)
+      const rank = results.find(item => item.baan === baan)?.rank ?? null
+      return { status: 'ok', correct: true, alreadyCorrect: true, rank, results }
+    }
+
+    const now = new Date()
+    const cell = sheet.getRange(row, config.timeCol)
+    cell.setValue(now)
+    cell.setNumberFormat('yyyy-mm-dd hh:mm:ss.000')
+    const results = rankEventAnswers_(sheet, config)
+    SpreadsheetApp.flush()
+    const rank = results.find(item => item.baan === baan)?.rank ?? null
+    return { status: 'ok', correct: true, rank, results }
+  } catch (err) {
+    return { status: 'error', message: /lock|busy/i.test(String(err)) ? 'Event sheet is busy. Please retry.' : String(err) }
+  } finally {
+    releaseNamedLock_(lock)
+  }
+}
+
+function handleSetEventSolutionVisible(payload) {
+  if (!verifyAccessToken_({ kind: 'page', pageKey: 'web5', token: payload.token })) {
+    return { status: 'error', message: 'Unauthorized' }
+  }
+  const config = eventWaveConfig_(payload.wave)
+  if (!config) return { status: 'error', message: 'Event is available only in wave 2 or wave 4' }
+  PropertiesService.getScriptProperties().setProperty(eventSolutionKey_(config.wave), payload.visible === true ? 'true' : 'false')
+  return { status: 'ok', visible: payload.visible === true }
+}
+
 function handleWriteGameState(state) {
   const wave = Number(state.currentWave)
   const duration = Number(state.duration || 10)
+  const gameMode = state.gameMode === 'bet' || state.gameMode === 'event' ? state.gameMode : 'bid'
   if (!wave || wave < 1 || wave > 5) return { status: 'error', message: 'Invalid currentWave' }
 
   const ss = SpreadsheetApp.openById(SHEET_ID)
@@ -825,10 +1143,12 @@ function handleWriteGameState(state) {
     ['isOpen', state.isOpen === true ? 'true' : 'false'],
     ['timerEnd', state.timerEnd || ''],
     ['duration', duration],
-    ['gameMode', state.gameMode === 'bet' ? 'bet' : 'bid'],
+    ['gameMode', gameMode],
     ['gamePhase', state.gamePhase === 'select-disaster' ? 'select-disaster' : 'play'],
     ['showResults', state.showResults === true ? 'true' : 'false'],
+    ['showEventSolution', state.showEventSolution === true ? 'true' : 'false'],
     ['ambassadorVisibility', JSON.stringify(state.ambassadorVisibility || {})],
+    ['chatPermissions', JSON.stringify(state.chatPermissions || {})],
     ['updatedAt', state.updatedAt || new Date().toISOString()],
   ]
   sheet.getRange(1, 1, rows.length, 2).setValues(rows)

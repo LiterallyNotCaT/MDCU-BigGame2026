@@ -16,7 +16,7 @@ import {
   subscribeStore, getActiveDisasterForWave, setActiveDisaster, startCloudSync,
 } from '@/lib/store'
 import { fetchWaveInfo, fetchWaveInputs, writeToSheet, type WaveInputRow } from '@/lib/sheets'
-import { getBaanPasswordFromSheet, passwordSessionToken } from '@/lib/passwords'
+import { verifyBaanPassword, verifyPasswordSession } from '@/lib/passwords'
 
 const DISASTER_IDS = Array.from({ length: 9 }, (_, i) => i + 1)
 
@@ -37,17 +37,17 @@ function BaanLogin({ onLogin }: { onLogin:(b:number)=>void }) {
     const b = parseInt(baan)
     if (isNaN(b)||b<1||b>12) { setErr('กรอกเลขบ้าน 1–12 เท่านั้น'); return }
     setCheckingPassword(true)
-    const expectedPassword = await getBaanPasswordFromSheet(b, true).catch(error => {
+    const result = await verifyBaanPassword(b, pass).catch(error => {
       console.error(error)
-      return ''
+      return { ok: false, token: undefined, message: String(error) }
     })
     setCheckingPassword(false)
-    if (!expectedPassword || pass !== expectedPassword) {
+    if (!result.ok || !result.token) {
       setErr('รหัสไม่ถูกต้อง'); setShake(true)
       setTimeout(()=>setShake(false),500); return
     }
     sessionStorage.setItem('baan_login',String(b))
-    sessionStorage.setItem('baan_login_token', await passwordSessionToken(`baan:${b}`, expectedPassword))
+    sessionStorage.setItem('baan_login_token', result.token)
     onLogin(b)
   }
 
@@ -108,19 +108,19 @@ function BaanLoginV2({ onLogin }: { onLogin:(b:number)=>void }) {
       return
     }
     setCheckingPassword(true)
-    const expectedPassword = await getBaanPasswordFromSheet(b, true).catch(error => {
+    const result = await verifyBaanPassword(b, pass).catch(error => {
       console.error(error)
-      return ''
+      return { ok: false, token: undefined, message: String(error) }
     })
     setCheckingPassword(false)
-    if (!expectedPassword || pass !== expectedPassword) {
+    if (!result.ok || !result.token) {
       setErr('รหัสผ่านไม่ถูกต้อง')
       setShake(true)
       setTimeout(() => setShake(false), 500)
       return
     }
     sessionStorage.setItem('baan_login', String(b))
-    sessionStorage.setItem('baan_login_token', await passwordSessionToken(`baan:${b}`, expectedPassword))
+    sessionStorage.setItem('baan_login_token', result.token)
     onLogin(b)
   }
 
@@ -231,6 +231,168 @@ function normalizeSheetBetTarget(value: string) {
   return Number.isInteger(baan) && baan >= 1 && baan <= 12 ? String(baan) : ''
 }
 
+type EventRank = { rank: number; baan: number }
+type EventStatus = {
+  wave: number
+  questionReady?: boolean
+  solutionVisible?: boolean
+  results?: EventRank[]
+}
+
+function EventGamePanel({ baan, wave, isOpen, showSolution }: { baan: number; wave: number; isOpen: boolean; showSolution: boolean }) {
+  const [status, setStatus] = useState<EventStatus | null>(null)
+  const [answer, setAnswer] = useState('')
+  const [message, setMessage] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const currentEventRef = useRef({ wave, showSolution })
+  const ownRank = status?.results?.find(item => item.baan === baan)?.rank ?? null
+  const canSubmit = isOpen && !submitting && Boolean(answer.trim()) && !ownRank
+
+  const refreshStatus = useCallback(async () => {
+    if (wave !== 2 && wave !== 4) return
+    try {
+      const res = await fetch(`/api/event/status?wave=${wave}&t=${Date.now()}`, { cache: 'no-store' })
+      const data = await res.json()
+      const current = currentEventRef.current
+      if (current.wave !== wave) return
+      if (res.ok && data.status !== 'error') {
+        const safeData: EventStatus = {
+          wave: Number(data.wave),
+          questionReady: data.questionReady === true,
+          solutionVisible: current.showSolution && data.solutionVisible === true,
+          results: Array.isArray(data.results) ? data.results : [],
+        }
+        setStatus(safeData)
+      }
+    } catch (error) {
+      console.error(error)
+    }
+  }, [wave])
+
+  useEffect(() => {
+    currentEventRef.current = { wave, showSolution }
+  }, [wave, showSolution])
+
+  useEffect(() => {
+    setStatus(null)
+    setAnswer('')
+    setMessage('')
+  }, [wave])
+
+  useEffect(() => {
+    if (!showSolution) {
+      setStatus(prev => prev ? { ...prev, solutionVisible: false } : prev)
+    }
+  }, [showSolution])
+
+  useEffect(() => {
+    void refreshStatus()
+    const interval = window.setInterval(refreshStatus, isOpen ? 2500 : 6000)
+    return () => window.clearInterval(interval)
+  }, [isOpen, refreshStatus])
+
+  useEffect(() => {
+    void refreshStatus()
+  }, [showSolution, refreshStatus])
+
+  const submitAnswer = async (event: React.FormEvent) => {
+    event.preventDefault()
+    const cleaned = answer.trim()
+    if (!isOpen || !cleaned || submitting || ownRank) return
+    setSubmitting(true)
+    setMessage('')
+    try {
+      const res = await fetch('/api/event/answer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          wave,
+          baan,
+          answer: cleaned,
+          token: sessionStorage.getItem('baan_login_token') || '',
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || data.status === 'error') throw new Error(data.message || 'Submit failed')
+      if (data.correct) {
+        setMessage(`Correct! Rank ${data.rank ?? '-'}`)
+        setAnswer('')
+      } else {
+        setMessage('Wrong answer')
+      }
+      await refreshStatus()
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="event-game-panel">
+      <div className="event-main-column">
+        <div className="event-question-frame">
+        {status?.questionReady ? (
+          <img
+            key={`question-${wave}`}
+            src={`/api/event/image?wave=${wave}&type=question&v=${wave}`}
+            alt="Event question"
+            className="event-question-image"
+            draggable={false}
+          />
+        ) : (
+          <div className="event-question-placeholder">Event question</div>
+        )}
+        </div>
+      {showSolution && status?.solutionVisible ? (
+        <div className="event-question-frame">
+          <img
+            key={`solution-${wave}-${showSolution ? 'shown' : 'hidden'}`}
+            src={`/api/event/image?wave=${wave}&type=solution&v=${wave}-${status?.solutionVisible ? '1' : '0'}`}
+            alt="Event solution"
+            className="event-question-image"
+            draggable={false}
+          />
+        </div>
+      ) : showSolution ? (
+        <div className="event-solution-missing">Solution image is not configured.</div>
+      ) : null}
+      <form onSubmit={submitAnswer} className="event-answer-form">
+        <input
+          value={answer}
+          onChange={event => setAnswer(event.target.value)}
+          disabled={!isOpen || submitting || Boolean(ownRank)}
+          className="input-base event-answer-input"
+          placeholder={ownRank ? `Already correct: rank ${ownRank}` : isOpen ? 'Type answer' : 'Waiting for admin to open'}
+        />
+        <button type="submit" disabled={!canSubmit} className="btn btn-primary event-answer-button">
+          {submitting ? 'Checking...' : 'submit&check'}
+        </button>
+      </form>
+      {message && (
+        <div className={clsx('event-answer-message', message.toLowerCase().includes('wrong') ? 'bad' : 'good')}>
+          {message}
+        </div>
+      )}
+      </div>
+
+      <aside className="event-rank-sidebar" aria-live="polite">
+        <div className="event-rank-sidebar-title">Rank</div>
+        <div className="event-rank-list">
+        {(status?.results ?? []).length ? (status?.results ?? []).map(item => (
+          <div key={`${item.rank}-${item.baan}`} className="event-rank-item">
+            <span>{item.rank}</span>
+            <strong>{HOUSE_NAMES[item.baan]}</strong>
+          </div>
+        )) : (
+          <div className="event-rank-empty">No correct answers yet.</div>
+        )}
+        </div>
+      </aside>
+    </div>
+  )
+}
+
 function BiddingGame({ baan }: { baan:number }) {
   const [gs,        setGS]        = useState(getGameState)
   const [cart,      setCart]      = useState<CartItem[]>([])
@@ -243,6 +405,7 @@ function BiddingGame({ baan }: { baan:number }) {
   const [savedAt,   setSavedAt]   = useState('')
   const [saveMessage, setSaveMessage] = useState('')
   const [isSyncing, setIsSyncing] = useState(false)
+  const [syncReason, setSyncReason] = useState<'manual' | 'auto' | null>(null)
   const [draftReady, setDraftReady] = useState(false)
   const [betTarget, setBetTarget] = useState('')
   const [betAmount, setBetAmount] = useState('')
@@ -251,7 +414,6 @@ function BiddingGame({ baan }: { baan:number }) {
   const [isLoaded] = useState(true)
   const [resultToast, setResultToast] = useState<{ wave: number; key: number; leaving?: boolean } | null>(null)
   const [highlightedResultWave, setHighlightedResultWave] = useState<{ wave: number; leaving?: boolean } | null>(null)
-  const saveTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const saveInFlight = useRef(false)
   const hydratedSubmissionKey = useRef('')
   const historySectionRef = useRef<HTMLElement | null>(null)
@@ -268,14 +430,15 @@ function BiddingGame({ baan }: { baan:number }) {
   const minBetAmount = balance > 0 ? Math.ceil(balance * 0.1) : 0
   const isBetAmountValid = balance > 0 && Number.isFinite(betAmountNumber) && betAmountNumber >= minBetAmount && betAmountNumber <= balance
   const isBetMode = gs.gameMode === 'bet'
+  const isEventMode = gs.gameMode === 'event'
   const isSelectDisasterPhase = !isBetMode && gs.gamePhase === 'select-disaster'
-  const draftMode = isBetMode ? 'bet' : isSelectDisasterPhase ? 'select-disaster' : 'bid'
+  const draftMode = isBetMode ? 'bet' : isEventMode ? 'event' : isSelectDisasterPhase ? 'select-disaster' : 'bid'
   const draftKey = `biggame_bidding_draft:${baan}:${gs.currentWave}:${draftMode}`
   const currentSubmission = getSubmissionsForBaan(baan).find(s => s.wave === gs.currentWave)
   const priorBetSpend = !isBetMode ? sheetBetSpend || currentSubmission?.betAmount || 0 : 0
   const effectiveBalance = Math.max(0, balance - priorBetSpend)
   const canChooseKingDisaster = isKing || currentKing === baan
-  const canEditBid = gs.isOpen && !isBetMode && !isSelectDisasterPhase
+  const canEditBid = gs.isOpen && !isBetMode && !isEventMode && !isSelectDisasterPhase
   const canSelectKingDisaster = gs.isOpen && isSelectDisasterPhase && canChooseKingDisaster
   const canSeeCurrentOwnership = gs.showResults === true || canSelectKingDisaster
   const sheetOwnership = useWaveOwnership(gs.currentWave)
@@ -575,8 +738,10 @@ function BiddingGame({ baan }: { baan:number }) {
   }, [canChooseKingDisaster])
 
   /* save — local store + write to Google Sheet */
-  const handleSave = useCallback(async ()=>{
+  const handleSave = useCallback(async (mode: 'manual' | 'auto' = 'manual')=>{
     if(!gs.isOpen) return
+    if(isEventMode) return
+    if(mode === 'auto' && isSaved) return
     if(saveInFlight.current) return
     const hasInvalidBidAmount = cart.some(i => !Number.isFinite(i.amount) || i.amount < 100)
     if(isBetMode && !isBetAmountValid) return
@@ -586,7 +751,8 @@ function BiddingGame({ baan }: { baan:number }) {
     const timestamp = new Date().toLocaleTimeString('th-TH')
     saveInFlight.current = true
     setIsSyncing(true)
-    setSaveMessage('Sending to admin...')
+    setSyncReason(mode)
+    setSaveMessage(mode === 'auto' ? 'Autosaving...' : 'Sending to admin...')
 
     // 1. Save locally (instant, always works)
     saveSubmission({
@@ -625,6 +791,7 @@ function BiddingGame({ baan }: { baan:number }) {
     writeToSheet(payload).then(res => {
       saveInFlight.current = false
       setIsSyncing(false)
+      setSyncReason(null)
       setSaveMessage(res.ok ? 'Sent to admin' : `Admin sync error: ${res.message ?? 'not sent'}`)
       if (!res.ok) {
         setIsSaved(false)
@@ -641,26 +808,12 @@ function BiddingGame({ baan }: { baan:number }) {
     }).catch(e => {
       saveInFlight.current = false
       setIsSyncing(false)
+      setSyncReason(null)
       setSaveMessage('Admin sync error')
       setIsSaved(false)
       console.error(e)
     })
-  },[baan,cart,gs.currentWave,gs.isOpen,canChooseKingDisaster,canSelectKingDisaster,kingDis,balance,totalBet,isBetMode,isSelectDisasterPhase,betTarget,betSpend,isBetAmountValid,fetchBalance,fetchSheetSnapshot,effectiveBalance,currentSubmission,islandCart,kingBid,kingBidAmount,draftKey])
-
-  /* autosave */
-  useEffect(()=>{
-    clearTimeout(saveTimer.current)
-    if(!gs.isOpen) {
-      return
-    }
-    if(isBetMode) return
-    if(isSaved || isSyncing) return
-    if(isSelectDisasterPhase && !canSelectKingDisaster) return
-    if(!isSelectDisasterPhase && cart.length===0) return
-    if(isSelectDisasterPhase && !kingDis) return
-    saveTimer.current=setTimeout(handleSave,5000)
-    return()=>{ clearTimeout(saveTimer.current) }
-  },[cart,kingDis,gs.isOpen,isBetMode,isSelectDisasterPhase,canSelectKingDisaster,isSaved,isSyncing,handleSave])
+  },[baan,cart,gs.currentWave,gs.isOpen,isSaved,canChooseKingDisaster,canSelectKingDisaster,kingDis,balance,totalBet,isBetMode,isEventMode,isSelectDisasterPhase,betTarget,betSpend,isBetAmountValid,fetchBalance,fetchSheetSnapshot,effectiveBalance,currentSubmission,islandCart,kingBid,kingBidAmount,draftKey])
 
   const normalizeBetAmount = () => {
     if (betAmount.trim() === '') return
@@ -700,18 +853,18 @@ function BiddingGame({ baan }: { baan:number }) {
           </div>
         </div>
         <div className="wire-time">
-          <Timer endTime={gs.timerEnd} isOpen={gs.isOpen} onExpire={handleSave} compact />
+          <Timer endTime={gs.timerEnd} isOpen={gs.isOpen} onExpire={isEventMode ? undefined : () => { void handleSave('auto') }} compact />
         </div>
       </header>
 
       <main className="wire-scroll">
         <div className="wire-content">
-          <div className={clsx('wire-pill-row', isBetMode && 'wire-pill-row-bet')}>
+          <div className={clsx('wire-pill-row', isBetMode && 'wire-pill-row-bet', isEventMode && 'wire-pill-row-event')}>
             <div className="wire-pill-status-group">
-              <div className="wire-pill">{isBetMode ? 'Bet game' : 'Bid game'}</div>
-              <div className="wire-pill">Balance : {effectiveBalance.toLocaleString()}</div>
-              {!isBetMode && <div className="wire-pill">King : {currentKing ? HOUSE_NAMES[currentKing] : '-'}</div>}
-              <div className={clsx('badge', gs.isOpen?'badge-green':'badge-red')}>
+              <div className="wire-pill wire-pill-game">{isEventMode ? 'Event game' : isBetMode ? 'Bet game' : 'Bid game'}</div>
+              {!isEventMode && <div className="wire-pill wire-pill-balance">Balance : {effectiveBalance.toLocaleString()}</div>}
+              {!isBetMode && !isEventMode && <div className="wire-pill wire-pill-king">King : {currentKing ? HOUSE_NAMES[currentKing] : '-'}</div>}
+              <div className={clsx('wire-pill-state badge', gs.isOpen?'badge-green':'badge-red')}>
                 <span className={clsx('status-dot', gs.isOpen?'online':'offline')} />
                 {gs.isOpen?'OPEN':'CLOSED'}
               </div>
@@ -722,29 +875,33 @@ function BiddingGame({ baan }: { baan:number }) {
               </div>
             )}
             <button onClick={()=>{sessionStorage.removeItem('baan_login');sessionStorage.removeItem('baan_login_token');window.location.reload()}}
-              className={clsx('btn btn-ghost', isBetMode && 'wire-bet-logout')}>
+              className={clsx('btn btn-ghost', isBetMode && 'wire-bet-logout', isEventMode && 'wire-edge-logout')}>
               <LogOut size={14} /> Logout
             </button>
           </div>
 
-          <section className={clsx('wire-layout-bidding', isBetMode && 'wire-layout-bet-only')}>
+          <section className={clsx('wire-layout-bidding', isBetMode && 'wire-layout-bet-only', isEventMode && 'wire-layout-event-only')}>
             <div id="bidding-main-fullscreen" className="space-y-3 fullscreen-scope">
               <FullscreenButton targetId="bidding-main-fullscreen" />
-              {!isBetMode && isSelectDisasterPhase && (
-                <div className="flex flex-wrap gap-2">
-                  <span className={clsx('badge', canChooseKingDisaster ? 'badge-gold' : 'badge-red')}>
-                    {canChooseKingDisaster ? 'You are choosing disaster' : 'King is choosing disaster'}
+              {(!gs.isOpen || (!isBetMode && isSelectDisasterPhase)) && (
+                <div className="bidding-status-notice-row">
+                  {!gs.isOpen && (
+                    <span className="event-closed-notice">
+                      รอ admin เปิดรอบ
+                    </span>
+                  )}
+                  {!isBetMode && isSelectDisasterPhase && (
+                  <span className={clsx('event-closed-notice disaster-phase-notice', canChooseKingDisaster ? 'is-king' : 'is-waiting')}>
+                    {canChooseKingDisaster ? 'You are choosing disaster' : 'King is choosing disaster. Please wait.'}
                   </span>
+                  )}
                 </div>
               )}
               <div className="wire-panel wire-panel-soft">
                 <div className="wire-panel-body">
-                  {!gs.isOpen && (
-                    <div className="mb-4 rounded bg-white/80 px-4 py-3 text-sm text-slate-700">
-                      ยังไม่เปิดรับการลงทุน - รอ Admin เปิดรอบ
-                    </div>
-                  )}
-                  {isBetMode ? (
+                  {isEventMode ? (
+                    <EventGamePanel baan={baan} wave={gs.currentWave} isOpen={gs.isOpen} showSolution={gs.showEventSolution === true} />
+                  ) : isBetMode ? (
                     <div className="mx-auto grid max-w-xl gap-4 sm:grid-cols-2">
                       <div>
                         <label className="text-label mb-2 block">House to bet on</label>
@@ -783,9 +940,9 @@ function BiddingGame({ baan }: { baan:number }) {
                           </div>
                         </div>
                       </div>
-                      <button onClick={handleSave} disabled={!gs.isOpen || isSyncing || !betTarget || !isBetAmountValid}
+                      <button onClick={() => { void handleSave('manual') }} disabled={!gs.isOpen || isSyncing || !betTarget || !isBetAmountValid}
                         className="btn btn-primary sm:col-span-2">
-                        {isSyncing ? 'Sending to admin...' : `Submit bet ${betSpend ? `· ${betSpend.toLocaleString()}` : ''}`}
+                        {isSyncing ? (syncReason === 'auto' ? 'Autosaving...' : 'Sending to admin...') : `Submit bet ${betSpend ? `· ${betSpend.toLocaleString()}` : ''}`}
                       </button>
                       {saveMessage && (
                         <div className="sm:col-span-2 px-2 py-1 text-center text-xs font-semibold text-emerald-700">
@@ -795,16 +952,6 @@ function BiddingGame({ baan }: { baan:number }) {
                     </div>
                   ) : (
                     <>
-                      {isSelectDisasterPhase && !canChooseKingDisaster && (
-                        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
-                          King is choosing disaster. Please wait.
-                        </div>
-                      )}
-                      {!canSeeCurrentOwnership && (
-                        <div className="mb-4 rounded-lg border border-slate-200 bg-white/85 px-4 py-3 text-sm font-semibold text-slate-700">
-                          Ownerships are hidden until admin shows results.
-                        </div>
-                      )}
                     <GameMap ownership={visibleOwnership} selected={selectedAreas}
                       onSelect={handleSelect} filterDisaster={filterDis}
                       readOnly={!canEditBid}
@@ -817,7 +964,7 @@ function BiddingGame({ baan }: { baan:number }) {
                 </div>
               </div>
 
-              {!isBetMode && <div className="flex flex-wrap items-center gap-1.5">
+              {!isBetMode && !isEventMode && <div className="flex flex-wrap items-center gap-1.5">
                 <span className="wire-toolbar-panel text-sm">Filter</span>
                 {DISASTER_IDS.map((id)=>(
                   <button key={id} onClick={()=>setFilterDis(filterDis===id?null:id)}
@@ -829,31 +976,22 @@ function BiddingGame({ baan }: { baan:number }) {
               </div>}
             </div>
 
-            {!isBetMode && (
+            {!isBetMode && !isEventMode && (
               <aside className="wire-panel wire-side-panel">
                 <BiddingCart baan={baan} balance={effectiveBalance} items={cart} isKing={canChooseKingDisaster}
                   kingDisaster={kingDis}
                   onUpdate={handleCartUpdate}
                   onKingDisaster={handleKingDisasterUpdate}
-                  onSubmit={handleSave} isSaved={isSaved} savedAt={savedAt} isOpen={gs.isOpen}
+                  onSubmit={() => { void handleSave('manual') }} isSaved={isSaved} savedAt={savedAt} isOpen={gs.isOpen}
                   isSyncing={isSyncing}
+                  syncLabel={syncReason === 'auto' ? 'Autosaving...' : 'Sending to admin...'}
                   bidOpen={canEditBid}
                   disasterOpen={canSelectKingDisaster}
                   isDisasterPhase={isSelectDisasterPhase} />
-                <div className="wire-section-title bg-blue-500 text-white">
-                  {isSyncing
-                    ? 'Sending to admin...'
-                    : saveMessage === 'Sent to admin'
-                      ? 'Sent to admin'
-                      : isSaved
-                        ? (savedAt ? `Saved at ${savedAt}` : 'Saved')
-                        : 'Unsaved / autosave in 5s'}
-                </div>
-                {saveMessage && <div className="px-4 pb-3 text-center text-xs font-semibold text-emerald-700">{saveMessage}</div>}
               </aside>
             )}
           </section>
-          {!isBetMode && <section ref={historySectionRef} id="history-panel" className="wire-history wire-panel">
+          {!isBetMode && !isEventMode && <section ref={historySectionRef} id="history-panel" className="wire-history wire-panel">
             <div className="wire-history-body">
               <FinanceHistory
                 initialBaan={baan}
@@ -884,9 +1022,11 @@ export default function BiddingPage() {
       const s=sessionStorage.getItem('baan_login')
       const storedBaan = s ? parseInt(s) : NaN
       if(storedBaan >= 1 && storedBaan <= 12) {
-        const password = await getBaanPasswordFromSheet(storedBaan).catch(() => '')
-        const token = password ? await passwordSessionToken(`baan:${storedBaan}`, password) : ''
-        if (!cancelled && token && sessionStorage.getItem('baan_login_token') === token) {
+        const token = sessionStorage.getItem('baan_login_token') || ''
+        const result = token
+          ? await verifyPasswordSession({ kind: 'baan', baan: storedBaan, token }).catch(() => ({ ok: false }))
+          : { ok: false }
+        if (!cancelled && result.ok) {
           setBaan(storedBaan)
         } else {
           sessionStorage.removeItem('baan_login')

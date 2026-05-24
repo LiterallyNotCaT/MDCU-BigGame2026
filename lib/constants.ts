@@ -96,9 +96,10 @@ export interface GameState {
   isOpen: boolean       // submissions open/closed
   timerEnd: string | null  // ISO timestamp
   duration: number      // minutes per wave
-  gameMode?: 'bid' | 'bet'
+  gameMode?: 'bid' | 'bet' | 'event'
   gamePhase?: 'play' | 'select-disaster'
   showResults?: boolean
+  showEventSolution?: boolean
   ambassadorVisibility?: AmbassadorVisibility
   chatPermissions?: ChatPermissions
   updatedAt?: string
@@ -153,7 +154,7 @@ export function normalizeAmbassadorVisibility(value?: Partial<AmbassadorVisibili
 export function normalizeChatPermissions(value?: Partial<ChatPermissions> | null): ChatPermissions {
   return {
     groupChat: value?.groupChat === undefined ? DEFAULT_CHAT_PERMISSIONS.groupChat : value.groupChat === true,
-    adminPrivate: value?.adminPrivate === undefined ? DEFAULT_CHAT_PERMISSIONS.adminPrivate : value.adminPrivate === true,
+    adminPrivate: true,
     playerPrivate: value?.playerPrivate === undefined ? DEFAULT_CHAT_PERMISSIONS.playerPrivate : value.playerPrivate === true,
   }
 }

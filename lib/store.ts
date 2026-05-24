@@ -54,6 +54,7 @@ export const defaultGameState: GameState = {
   gameMode: 'bid',
   gamePhase: 'play',
   showResults: false,
+  showEventSolution: false,
   ambassadorVisibility: DEFAULT_AMBASSADOR_VISIBILITY,
   chatPermissions: DEFAULT_CHAT_PERMISSIONS,
 }
@@ -122,9 +123,10 @@ export async function fetchGameStateFromSheet(): Promise<GameState | null> {
       isOpen: values.get('isOpen') === 'true',
       timerEnd: values.get('timerEnd') || null,
       duration: Number.isFinite(duration) && duration > 0 ? duration : defaultGameState.duration,
-      gameMode: gameModeRaw === 'bet' ? 'bet' : 'bid',
+      gameMode: gameModeRaw === 'bet' || gameModeRaw === 'event' ? gameModeRaw : 'bid',
       gamePhase: gamePhaseRaw === 'select-disaster' ? 'select-disaster' : 'play',
       showResults: values.get('showResults') === 'true',
+      showEventSolution: values.get('showEventSolution') === 'true',
       ambassadorVisibility: normalizeAmbassadorVisibility(
         values.get('ambassadorVisibility') ? JSON.parse(values.get('ambassadorVisibility') || '{}') : undefined,
       ),

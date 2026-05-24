@@ -30,6 +30,7 @@ import {
 
 const BID_PLAY_MINUTES = 10
 const BET_PLAY_MINUTES = 2
+const EVENT_PLAY_MINUTES = 10
 const DISASTER_SELECT_MINUTES = 3
 type WaveMeta = { king: number | null; disaster: number | null }
 const AMBASSADOR_TAB_CONTROLS: Array<{ key: AmbassadorTabKey; label: string }> = [
@@ -39,10 +40,9 @@ const AMBASSADOR_TAB_CONTROLS: Array<{ key: AmbassadorTabKey; label: string }> =
   { key: 'history', label: 'Finance history' },
   { key: 'lieHistory', label: 'Lie history' },
 ]
-const CHAT_PERMISSION_CONTROLS: Array<{ key: keyof ChatPermissions; label: string; detail: string }> = [
-  { key: 'adminPrivate', label: 'Admin private', detail: 'Players can DM admin' },
-  { key: 'groupChat', label: 'Group chat', detail: 'Players can use public chat' },
-  { key: 'playerPrivate', label: 'Player private', detail: 'Players can DM each other' },
+const CHAT_PERMISSION_CONTROLS: Array<{ key: keyof ChatPermissions; label: string }> = [
+  { key: 'groupChat', label: 'Group chat' },
+  { key: 'playerPrivate', label: 'Player private' },
 ]
 
 function submissionKey(wave: number, baan: number) {
@@ -73,6 +73,7 @@ function AdminContent() {
   const [duration,    setDuration]    = useState(() => {
     const state = getGameState()
     if (state.gameMode === 'bet') return String(BET_PLAY_MINUTES)
+    if (state.gameMode === 'event') return String(EVENT_PLAY_MINUTES)
     if (state.gamePhase === 'select-disaster') return String(DISASTER_SELECT_MINUTES)
     return String(BID_PLAY_MINUTES)
   })
@@ -162,22 +163,71 @@ function AdminContent() {
   }, [gs.isOpen, gs.timerEnd])
 
   // ── Controls ────────────────────────────────────────────
+  const isEventWave = (w: number) => w === 2 || w === 4
+  const wavePrevTarget = gs.currentWave > 1 ? gs.currentWave - 1 : null
+  const waveNextTarget = gs.currentWave < TOTAL_WAVES ? gs.currentWave + 1 : null
+
   const gotoWave = (w:number) => {
-    applyGS({currentWave:w, isOpen:false, timerEnd:null, showResults:false, gamePhase:'play'})
+    if (gs.gameMode === 'event' && !isEventWave(w)) {
+      setDuration(String(BET_PLAY_MINUTES))
+      applyGS({
+        currentWave:w,
+        gameMode:'bet',
+        gamePhase:'play',
+        duration:BET_PLAY_MINUTES,
+        isOpen:false,
+        timerEnd:null,
+        showResults:false,
+        showEventSolution:false,
+      })
+      notify(`Wave ${w} is not an Event wave, switched to Bet game`)
+      return
+    }
+    applyGS({currentWave:w, isOpen:false, timerEnd:null, showResults:false, showEventSolution:false, gamePhase:'play'})
     notify(`➡ เข้าสู่ Wave ${w}`)
   }
   const selectBidMode = () => {
     setDuration(String(BID_PLAY_MINUTES))
-    applyGS({gameMode:'bid', gamePhase:'play', duration:BID_PLAY_MINUTES})
+    applyGS({gameMode:'bid', gamePhase:'play', duration:BID_PLAY_MINUTES, showEventSolution:false})
     notify('Bid game ready: 10 min island + king bid')
   }
   const selectBetMode = () => {
     setDuration(String(BET_PLAY_MINUTES))
-    applyGS({gameMode:'bet', gamePhase:'play', duration:BET_PLAY_MINUTES})
+    applyGS({gameMode:'bet', gamePhase:'play', duration:BET_PLAY_MINUTES, showEventSolution:false})
     notify('Bet game ready: 2 min')
   }
+  const setEventSolutionVisible = async (visible: boolean) => {
+    const token = sessionStorage.getItem('auth_web5') || ''
+    try {
+      const res = await fetch('/api/event/reveal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wave: gs.currentWave, visible, token }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || data.status === 'error') throw new Error(data.message || 'Event reveal failed')
+      applyGS({ showEventSolution: visible })
+      notify(visible ? 'Event solution shown' : 'Event solution hidden')
+    } catch (error) {
+      notify(error instanceof Error ? error.message : String(error), 'err')
+    }
+  }
+  const selectEventMode = () => {
+    if (gs.currentWave !== 2 && gs.currentWave !== 4) {
+      notify('Event is available only in Wave 2 and Wave 4', 'warn')
+      return
+    }
+    setDuration(String(EVENT_PLAY_MINUTES))
+    applyGS({gameMode:'event', gamePhase:'play', duration:EVENT_PLAY_MINUTES, showResults:false, showEventSolution:false})
+    void setEventSolutionVisible(false)
+    notify('Event game ready: 10 min')
+  }
   const startTimer = () => {
-    const fallback = gs.gameMode === 'bet' ? BET_PLAY_MINUTES : BID_PLAY_MINUTES
+    if (gs.gameMode === 'event' && !isEventWave(gs.currentWave)) {
+      notify('Event is available only in Wave 2 and Wave 4', 'warn')
+      return
+    }
+    const fallback = gs.gameMode === 'bet' ? BET_PLAY_MINUTES : gs.gameMode === 'event' ? EVENT_PLAY_MINUTES : BID_PLAY_MINUTES
     const mins = parseFloat(duration)||fallback
     applyGS({isOpen:true, timerEnd:new Date(Date.now()+mins*60000).toISOString(), duration:mins, showResults:false, gamePhase:'play'})
     notify(`▶ เปิดรับข้อมูล ${mins} นาที`)
@@ -193,6 +243,7 @@ function AdminContent() {
       timerEnd:new Date(Date.now()+mins*60000).toISOString(),
       duration:mins,
       showResults:false,
+      showEventSolution:false,
     })
     notify('Select disaster: current king has 3 min')
   }
@@ -205,7 +256,7 @@ function AdminContent() {
   const processWave = async () => {
     setProcessing(true)
     await fetchAll()
-    notify(`${gs.gameMode === 'bet' ? 'Bet' : 'Bid'} Wave ${gs.currentWave} refreshed from Google Sheet`)
+    notify(`${gs.gameMode === 'event' ? 'Event' : gs.gameMode === 'bet' ? 'Bet' : 'Bid'} Wave ${gs.currentWave} refreshed from Google Sheet`)
     setProcessing(false)
   }
   const resetSubmissionCounts = () => {
@@ -234,7 +285,7 @@ function AdminContent() {
     applyGS({ ambassadorVisibility: normalizeAmbassadorVisibility(patch) })
   }
   const setChatPermissions = (patch: Parameters<typeof normalizeChatPermissions>[0]) => {
-    applyGS({ chatPermissions: normalizeChatPermissions(patch) })
+    applyGS({ chatPermissions: normalizeChatPermissions({ ...patch, adminPrivate: true }) })
   }
   const toggleAmbassadorTab = (key: AmbassadorTabKey) => {
     setAmbassadorVisibility({
@@ -449,14 +500,19 @@ function AdminContent() {
                 </div>
                 {controlTab === 'games' ? (
                   <>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   <button onClick={selectBidMode}
-                    className={clsx('btn', gs.gameMode !== 'bet' && gs.gamePhase !== 'select-disaster' ? 'btn-primary' : 'btn-ghost')}>
+                    className={clsx('btn', gs.gameMode === 'bid' && gs.gamePhase !== 'select-disaster' ? 'btn-primary' : 'btn-ghost')}>
                     Bid game
                   </button>
                   <button onClick={selectBetMode}
                     className={clsx('btn', gs.gameMode === 'bet' ? 'btn-primary' : 'btn-ghost')}>
                     Bet game
+                  </button>
+                  <button onClick={selectEventMode}
+                    disabled={gs.currentWave !== 2 && gs.currentWave !== 4}
+                    className={clsx('btn', gs.gameMode === 'event' ? 'btn-primary' : 'btn-ghost')}>
+                    Event
                   </button>
                 </div>
                 {gs.gameMode === 'bid' && (
@@ -467,11 +523,30 @@ function AdminContent() {
                     Select disaster (king only, 3 min)
                   </button>
                 )}
+                {gs.gameMode === 'event' && (
+                  <button
+                    onClick={() => {
+                      if (!gs.showEventSolution && !window.confirm('ยืนยันเปิดเฉลย?')) return
+                      void setEventSolutionVisible(!gs.showEventSolution)
+                    }}
+                    className={clsx('btn admin-event-solution-button', gs.showEventSolution ? 'btn-success' : 'btn-ghost')}
+                  >
+                    {gs.showEventSolution ? 'Hide solution' : 'Show solution'}
+                  </button>
+                )}
                 <div className="wire-panel admin-wave-card colorful-box colorful-box-sky bg-white p-4">
                   <div className="mb-4 grid grid-cols-[44px_minmax(0,1fr)_44px] items-center gap-2">
-                    <button onClick={()=>gs.currentWave>1&&gotoWave(gs.currentWave-1)} className="btn btn-ghost admin-wave-arrow"><ChevronLeft size={18}/></button>
+                    <button
+                      onClick={() => wavePrevTarget !== null && gotoWave(wavePrevTarget)}
+                      disabled={wavePrevTarget === null}
+                      className="btn btn-ghost admin-wave-arrow"
+                    ><ChevronLeft size={18}/></button>
                     <div className="admin-wave-label">Wave {gs.currentWave}/{TOTAL_WAVES}</div>
-                    <button onClick={()=>gs.currentWave<TOTAL_WAVES&&gotoWave(gs.currentWave+1)} className="btn btn-ghost admin-wave-arrow"><ChevronRight size={18}/></button>
+                    <button
+                      onClick={() => waveNextTarget !== null && gotoWave(waveNextTarget)}
+                      disabled={waveNextTarget === null}
+                      className="btn btn-ghost admin-wave-arrow"
+                    ><ChevronRight size={18}/></button>
                   </div>
                   <div className="mb-3 flex items-center gap-2">
                     <input type="number" min={1} max={120} value={duration}
@@ -505,7 +580,6 @@ function AdminContent() {
                 <div className="wire-panel admin-ambassador-visibility-card bg-white p-3">
                   <div className="mb-2">
                     <div className="font-display text-sm font-bold text-slate-800">Ambassador visibility</div>
-                    <div className="text-2xs font-semibold text-slate-500">Choose what players can see.</div>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     {AMBASSADOR_TAB_CONTROLS.map(item => (
@@ -531,7 +605,6 @@ function AdminContent() {
                 <div className="wire-panel admin-chat-permissions-card bg-white p-3">
                   <div className="mb-2">
                     <div className="font-display text-sm font-bold text-slate-800">Chat permissions</div>
-                    <div className="text-2xs font-semibold text-slate-500">Control what player chat channels are available.</div>
                   </div>
                   <div className="grid grid-cols-1 gap-2">
                     {CHAT_PERMISSION_CONTROLS.map(item => (
@@ -544,7 +617,6 @@ function AdminContent() {
                         className={clsx('btn admin-chat-permission-button px-2 text-xs', chatPermissions[item.key] ? 'btn-success' : 'btn-ghost')}
                       >
                         <span>{chatPermissions[item.key] ? 'Allow' : 'Block'} {item.label}</span>
-                        <small>{item.detail}</small>
                       </button>
                     ))}
                   </div>

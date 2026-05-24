@@ -8,6 +8,7 @@ interface HistoryEntry {
   wave?:      number
   label:      string
   detail?:    string
+  detailItems?: string[]
   amount:     number
   type:       'income' | 'bet' | 'reward' | 'lose' | 'start' | 'disaster'
   timestamp?: string
@@ -69,7 +70,7 @@ export default function HistoryPanel({
     <div className="history-panel flex flex-col gap-3">
       {/* Title row */}
       {(title || baan) && (
-        <div className="flex items-center justify-between flex-shrink-0">
+        <div className="history-panel-heading flex items-center justify-between flex-shrink-0">
           {title && <h3 className="history-panel-title font-display font-semibold text-sm text-slate-300">{title}</h3>}
           {baan && (
             <span className="badge" style={{
@@ -84,8 +85,8 @@ export default function HistoryPanel({
       )}
 
       {balance !== undefined && (
-        <div className="glass-light rounded-xl px-4 py-3 flex items-center justify-between flex-shrink-0">
-          <span className="text-label">Current Balance</span>
+        <div className="history-balance-card glass-light rounded-xl px-4 py-3 flex items-center justify-between flex-shrink-0">
+          <span className="history-balance-label text-label">Current Balance</span>
           <span className="font-mono font-bold text-lg text-green-400 text-glow-green">
             {balance.toLocaleString()}
           </span>
@@ -100,7 +101,7 @@ export default function HistoryPanel({
           return (
             <div key={key}>
               {/* Wave divider */}
-              <div className="flex items-center gap-3 mb-2.5">
+              <div className="history-wave-divider flex items-center gap-3 mb-2.5">
                 <div className="flex-1 h-px" style={{ background: `linear-gradient(90deg, ${color}40, transparent)` }} />
                 <span className="history-wave-divider-label text-2xs font-display font-bold tracking-widest px-3 py-1.5 rounded-full"
                   style={{ background: color + '18', color }}>
@@ -129,21 +130,30 @@ export default function HistoryPanel({
                       key={i}
                       style={highlightStyle}
                       className={clsx(
-                        'glass-light rounded-xl px-3 py-2.5 flex items-start gap-3',
+                        'history-entry-card glass-light rounded-xl px-3 py-2.5 flex items-start gap-3',
                         isHighlightedReveal && 'history-entry-new-result',
                         isHighlightedReveal && isRevealHighlightLeaving && 'is-leaving',
                       )}
                     >
                       {/* Icon */}
-                      <div className={clsx('w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5', meta.bg)}>
+                      <div className={clsx('history-entry-icon w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0', meta.bg)}>
                         <Icon size={13} className={meta.color} />
                       </div>
 
                       {/* Content */}
                       <div className="flex-1 min-w-0">
-                        <div className="text-sm text-slate-300 leading-snug">{entry.label}</div>
+                        <div className="history-entry-label text-sm text-slate-300 leading-snug">{entry.label}</div>
                         {entry.detail && (
-                          <div className="text-2xs text-slate-600 mt-0.5 leading-relaxed whitespace-pre-line">{entry.detail}</div>
+                          <div className="history-entry-detail text-slate-600 mt-1 leading-relaxed whitespace-pre-line">{entry.detail}</div>
+                        )}
+                        {entry.detailItems && entry.detailItems.length > 0 && (
+                          <div className="history-entry-chips">
+                            {entry.detailItems.map((item, itemIndex) => (
+                              <span key={`${item}-${itemIndex}`} className="history-entry-chip">
+                                {item}
+                              </span>
+                            ))}
+                          </div>
                         )}
                         {entry.timestamp && (
                           <div className="text-2xs text-slate-700 mt-0.5 font-mono">{entry.timestamp}</div>

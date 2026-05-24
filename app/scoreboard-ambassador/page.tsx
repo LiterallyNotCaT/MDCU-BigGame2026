@@ -15,7 +15,7 @@ import { TOTAL_WAVES, normalizeAmbassadorVisibility, type AmbassadorTabKey } fro
 import { AFTERNOON_SCORE_CSV_URL } from '@/lib/scoreboardSources'
 import { getGameState, subscribeStore, getActiveDisasterForWave, setActiveDisaster, startCloudSync } from '@/lib/store'
 import { fetchWaveInfo } from '@/lib/sheets'
-import { getKingProPassword, passwordSessionToken } from '@/lib/passwords'
+import { verifyKingProPassword, verifyPasswordSession } from '@/lib/passwords'
 
 const DISASTER_IDS = Array.from({ length: 9 }, (_, i) => i + 1)
 const TAB_META: Array<{ key: AmbassadorTabKey; label: string; icon: ReactNode }> = [
@@ -25,7 +25,6 @@ const TAB_META: Array<{ key: AmbassadorTabKey; label: string; icon: ReactNode }>
   { key: 'ownership', label: 'Ownership', icon: <Map size={14}/> },
   { key: 'lieHistory', label: 'Lie History', icon: <MessageSquareWarning size={14}/> },
 ]
-const KING_PRO_SCOPE = 'ambassador:king-pro'
 const KING_PRO_SESSION_KEY = 'ambassador_king_pro'
 const KING_PRO_RETURN_TAB_KEY = 'ambassador_king_pro_return_tab'
 
@@ -62,17 +61,16 @@ function AmbassadorContent() {
 
   useEffect(() => {
     let cancelled = false
-    getKingProPassword()
-      .then(async password => {
-        if (cancelled || !password) return
-        const token = await passwordSessionToken(KING_PRO_SCOPE, password)
-        if (!cancelled && sessionStorage.getItem(KING_PRO_SESSION_KEY) === token) {
+    const token = sessionStorage.getItem(KING_PRO_SESSION_KEY)
+    if (!token) return () => { cancelled = true }
+    verifyPasswordSession({ kind: 'kingPro', token })
+      .then(result => {
+        if (cancelled || !result.ok) return
           const storedTab = sessionStorage.getItem(KING_PRO_RETURN_TAB_KEY)
           if (TAB_META.some(item => item.key === storedTab)) {
             tabBeforeKingProRef.current = storedTab as AmbassadorTabKey
           }
           setKingProUnlocked(true)
-        }
       })
       .catch(console.error)
     return () => { cancelled = true }
@@ -113,20 +111,20 @@ function AmbassadorContent() {
 
     setKingProChecking(true)
     setKingProError('')
-    const expectedPassword = await getKingProPassword(true).catch(error => {
+    const result = await verifyKingProPassword(input).catch(error => {
       console.error(error)
-      return ''
+      return { ok: false, token: undefined, message: String(error) }
     })
     setKingProChecking(false)
 
-    if (!expectedPassword || input !== expectedPassword) {
+    if (!result.ok || !result.token) {
       setKingProError('Wrong password')
       return
     }
 
     tabBeforeKingProRef.current = tab
     sessionStorage.setItem(KING_PRO_RETURN_TAB_KEY, tab)
-    sessionStorage.setItem(KING_PRO_SESSION_KEY, await passwordSessionToken(KING_PRO_SCOPE, expectedPassword))
+    sessionStorage.setItem(KING_PRO_SESSION_KEY, result.token)
     setKingProUnlocked(true)
     setKingProInput('')
   }

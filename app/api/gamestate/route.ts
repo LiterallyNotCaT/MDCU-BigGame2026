@@ -25,6 +25,7 @@ const defaultState: GameState = {
   gameMode: 'bid',
   gamePhase: 'play',
   showResults: false,
+  showEventSolution: false,
   ambassadorVisibility: DEFAULT_AMBASSADOR_VISIBILITY,
   chatPermissions: DEFAULT_CHAT_PERMISSIONS,
 }
@@ -33,7 +34,7 @@ function normalizeGameState(value: unknown): GameState {
   const state = (value && typeof value === 'object' ? value : {}) as Partial<GameState>
   const currentWave = Number(state.currentWave)
   const duration = Number(state.duration)
-  const gameMode = state.gameMode === 'bet' ? 'bet' : 'bid'
+  const gameMode = state.gameMode === 'bet' || state.gameMode === 'event' ? state.gameMode : 'bid'
   const gamePhase = state.gamePhase === 'select-disaster' ? 'select-disaster' : 'play'
 
   return {
@@ -44,8 +45,9 @@ function normalizeGameState(value: unknown): GameState {
     timerEnd: typeof state.timerEnd === 'string' && state.timerEnd ? state.timerEnd : null,
     duration: Number.isFinite(duration) && duration > 0 ? duration : defaultState.duration,
     gameMode,
-    gamePhase: gameMode === 'bet' ? 'play' : gamePhase,
+    gamePhase: gameMode === 'bid' ? gamePhase : 'play',
     showResults: state.showResults === true,
+    showEventSolution: state.showEventSolution === true,
     ambassadorVisibility: normalizeAmbassadorVisibility(state.ambassadorVisibility),
     chatPermissions: normalizeChatPermissions(state.chatPermissions),
     updatedAt: typeof state.updatedAt === 'string' ? state.updatedAt : undefined,

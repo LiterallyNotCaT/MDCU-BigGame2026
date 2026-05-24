@@ -1,7 +1,7 @@
 'use client'
-import { memo, useEffect, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
-import { X, Minus, Plus, ChevronRight } from 'lucide-react'
+import { X, Minus, Plus, ChevronRight, CheckCircle2 } from 'lucide-react'
 import { HOUSE_COLORS } from '@/lib/constants'
 
 interface CartItem { area: string; amount: number }
@@ -19,6 +19,7 @@ interface BiddingCartProps {
   savedAt?:      string
   isOpen:        boolean
   isSyncing?:     boolean
+  syncLabel?:     string
   bidOpen?:      boolean
   disasterOpen?: boolean
   isDisasterPhase?: boolean
@@ -34,7 +35,7 @@ function sanitizeMoneyInput(value: string) {
 function BiddingCart({
   baan, balance, items, isKing, kingDisaster,
   onUpdate, onKingDisaster, onSubmit, isSaved, savedAt, isOpen,
-  isSyncing = false, bidOpen = isOpen, disasterOpen = isOpen && isKing, isDisasterPhase = false,
+  isSyncing = false, syncLabel = 'Sending to admin...', bidOpen = isOpen, disasterOpen = isOpen && isKing, isDisasterPhase = false,
 }: BiddingCartProps) {
   const color      = HOUSE_COLORS[baan]
   const maxAmountForArea = (area: string) => {
@@ -49,8 +50,6 @@ function BiddingCart({
   const remaining  = balance - totalBet
   const overBudget = remaining < 0
   const hasInvalidAmount = items.some(isAmountInvalid)
-  const hasKingBid = items.some(i=>i.area === 'KING')
-  const hasDisasterSummary = isDisasterPhase && kingDisaster != null
   const usagePct   = balance > 0 ? Math.min(1, totalBet / balance) : 0
   const amountControlsOpen = bidOpen && !isSyncing
   const disasterControlsOpen = disasterOpen && !isSyncing
@@ -58,10 +57,28 @@ function BiddingCart({
     ? disasterOpen && kingDisaster != null
     : bidOpen && items.length > 0 && !overBudget && !hasInvalidAmount)
   const [draftAmounts, setDraftAmounts] = useState<Record<string, string>>({})
+  const disasterSelectionRef = useRef<HTMLDivElement | null>(null)
+  const disasterScrollKeyRef = useRef('')
 
   useEffect(() => {
     setDraftAmounts(prev => Object.fromEntries(items.map(i => [i.area, prev[i.area] ?? String(i.amount)])))
   }, [items])
+
+  useEffect(() => {
+    if (!isDisasterPhase || !disasterOpen || !isKing) {
+      if (!isDisasterPhase) disasterScrollKeyRef.current = ''
+      return
+    }
+
+    const key = `${isDisasterPhase}:${disasterOpen}:${isKing}`
+    if (disasterScrollKeyRef.current === key) return
+    disasterScrollKeyRef.current = key
+
+    const id = window.setTimeout(() => {
+      disasterSelectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 120)
+    return () => window.clearTimeout(id)
+  }, [isDisasterPhase, disasterOpen, isKing])
 
   const updateAmount = (area: string, raw: number) => {
     const max = maxAmountForArea(area)
@@ -98,11 +115,11 @@ function BiddingCart({
   }
 
   return (
-    <div className="flex flex-col h-full gap-4 p-4 md:p-5">
+    <div className="bidding-cart-shell flex flex-col h-full gap-4 p-4 md:p-5">
 
       <div className="bidding-cart-header flex-shrink-0">
         <div className="flex items-center justify-between gap-3">
-          <h2 className="font-display text-lg font-black leading-none text-slate-950">
+          <h2 className="bidding-cart-title font-display text-lg font-black leading-none text-slate-950">
             {isDisasterPhase ? 'Disaster' : 'พื้นที่ที่เลือก'}
           </h2>
           <span className={clsx('badge', isOpen ? (isDisasterPhase ? 'badge-gold' : 'badge-green') : 'badge-red')}>
@@ -112,10 +129,10 @@ function BiddingCart({
       </div>
 
       {/* ── Balance summary ────────── */}
-      <div className="cart-card colorful-box colorful-box-balance rounded-3xl p-4">
-        <div className="flex items-baseline justify-between gap-3 mb-3">
-          <span className="text-label">Balance คงเหลือ</span>
-          <span className={clsx('font-mono font-bold text-2xl leading-none',
+      <div className="cart-balance-summary cart-card colorful-box colorful-box-balance rounded-3xl p-4">
+        <div className="cart-balance-row flex items-baseline justify-between gap-3 mb-3">
+          <span className="cart-balance-label text-label">Balance คงเหลือ</span>
+          <span className={clsx('cart-balance-number font-mono font-bold text-2xl leading-none',
             overBudget ? 'text-red-300' : 'text-green-300')}
             style={!overBudget ? { textShadow: '0 0 12px rgba(16,185,129,0.5)' } : undefined}>
             {remaining.toLocaleString()}
@@ -135,60 +152,23 @@ function BiddingCart({
         </div>
 
         {totalBet > 0 && (
-          <div className="flex justify-between text-2xs text-slate-600">
-            <span>ลงทุนแล้ว</span>
+          <div className="cart-spent-row flex justify-between text-2xs text-slate-600">
+            <span className="cart-spent-label">ลงทุนแล้ว</span>
             <span className="text-orange-400 font-mono">−{totalBet.toLocaleString()}</span>
           </div>
         )}
       </div>
 
       {/* ── King disaster picker ───── */}
-      {isKing && (
-        <div className="king-bid-card colorful-box colorful-box-gold cart-card rounded-3xl p-3 text-sm text-yellow-900">
-          <div className="font-display font-bold">King control</div>
-          <div className="mt-1 text-xs">
-            {isDisasterPhase ? 'Select the disaster ID for this wave.' : 'KING bid is separate and can be added from the map.'}
-          </div>
-          {!isDisasterPhase && !hasKingBid && (
-            <button type="button" onClick={()=>onUpdate([...items, { area: 'KING', amount: balance >= 100 ? 100 : 0 }])}
-              disabled={!amountControlsOpen || balance < 100}
-              className="btn btn-ghost mt-2 w-full">
-              Add KING bid
-            </button>
-          )}
-          {isDisasterPhase ? (
-          <div className="mt-3 grid grid-cols-3 gap-2">
-            {DISASTER_IDS.map(n => {
-              const active = kingDisaster === n
-              return (
-                <button key={n} onClick={()=>onKingDisaster(active?null:n)} disabled={!disasterControlsOpen}
-                  className={clsx(
-                    'min-h-14 rounded-2xl border-2 px-3 py-3 text-center font-mono text-lg font-black transition-all active:scale-95',
-                    active
-                      ? 'border-yellow-300 bg-fuchsia-700 text-white shadow-[0_12px_28px_rgba(190,24,93,0.42)] ring-4 ring-fuchsia-200'
-                      : 'border-slate-300 bg-white text-slate-900 hover:border-fuchsia-500 hover:bg-fuchsia-50 disabled:opacity-40'
-                  )}>
-                  D{n}
-                </button>
-              )
-            })}
-          </div>
-          ) : (
-            <div className="mt-3 rounded-2xl border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs font-semibold text-yellow-800">
-              Disaster selection opens after the 10 min bid phase.
-            </div>
-          )}
-        </div>
-      )}
       {/* Area list ──────────────── */}
       <div className="flex-1 min-h-0 flex flex-col gap-2 overflow-hidden">
-        <div className="flex items-center justify-between px-0.5">
-          <span className="text-label">รายการ <span className="text-blue-500">({items.length})</span></span>
+        <div className="cart-list-toolbar flex items-center justify-between px-0.5">
+          <span className="cart-list-title text-label">รายการ <span className="text-blue-500">({items.length})</span></span>
           {items.length > 0 && (
             <button onClick={()=>onUpdate([])}
               disabled={!amountControlsOpen}
               className={clsx(
-                'rounded-lg border px-3 py-1.5 text-2xs font-display font-semibold transition-colors',
+                'cart-clear-button rounded-lg border px-3 py-1.5 text-2xs font-display font-semibold transition-colors',
                 amountControlsOpen
                   ? 'border-red-200 bg-red-50 text-red-600 hover:bg-red-100 hover:text-red-700'
                   : 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed',
@@ -200,17 +180,7 @@ function BiddingCart({
 
         {/* Scroll area */}
         <div className="bidding-cart-scroll flex-1 overflow-y-auto space-y-2 pr-2">
-          {hasDisasterSummary && (
-            <div className="cart-card rounded-3xl border border-fuchsia-200 bg-fuchsia-50 p-3 text-sm text-fuchsia-950">
-              <div className="text-label text-fuchsia-700">Saved disaster</div>
-              <div className="mt-1 flex items-center justify-between gap-3">
-                <span className="font-display text-lg font-black">D{kingDisaster}</span>
-                <span className="badge badge-gold">from sheet</span>
-              </div>
-            </div>
-          )}
-
-          {items.length === 0 && !hasDisasterSummary && (
+          {items.length === 0 && (
             <div className="cart-card rounded-3xl flex flex-col items-center justify-center py-12 text-slate-600">
               <div className="text-3xl mb-3 opacity-60 animate-float">🗺️</div>
               <div className="text-sm text-center leading-relaxed">
@@ -233,7 +203,6 @@ function BiddingCart({
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="font-display font-black text-base text-slate-950">{isKingItem ? 'KING' : item.area}</span>
-                      {isKingItem && <span className="badge badge-gold" style={{ fontSize: '0.55rem' }}>KING</span>}
                     </div>
                   </div>
                   <button onClick={()=>remove(item.area)} disabled={!amountControlsOpen}
@@ -287,41 +256,67 @@ function BiddingCart({
         </div>
       </div>
 
+      {isKing && (
+        <div
+          ref={disasterSelectionRef}
+          className={clsx(
+            'king-disaster-selection-card cart-card rounded-3xl p-3',
+            isDisasterPhase && disasterOpen && 'is-active',
+          )}
+        >
+          <div className="king-disaster-copy">
+            <div className="king-disaster-title">King&apos;s Disaster Selection</div>
+            <p className="king-disaster-help">Opens after the 10 min bid phase.</p>
+          </div>
+
+          {isDisasterPhase && (
+            <div className="king-disaster-grid">
+              {DISASTER_IDS.map(n => {
+                const active = kingDisaster === n
+                return (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => onKingDisaster(active ? null : n)}
+                    disabled={!disasterControlsOpen}
+                    className={clsx(
+                      'king-disaster-choice',
+                      active && 'is-active',
+                    )}
+                  >
+                    D{n}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── Footer ─────────────────── */}
       <div className="space-y-2.5 flex-shrink-0">
-        {/* Save status */}
-        <div className={clsx(
-          'flex items-center gap-2 px-3 py-2 rounded-2xl text-xs font-display transition-all toast-lift',
-          isSyncing
-            ? 'bg-blue-500/10 text-blue-300 border border-blue-400/20'
-            : isSaved
-            ? 'bg-green-500/10 text-green-300 border border-green-400/20'
-            : 'bg-yellow-500/10 text-yellow-300 border border-yellow-400/20'
-        )}>
-          <span className="text-base leading-none">{isSyncing ? '⏳' : isSaved ? '✓' : '⏳'}</span>
-          <span className="flex-1 truncate text-2xs">
-            {isSyncing
-              ? 'Sending to admin...'
-              : isSaved
-                ? (savedAt ? `Saved · ${savedAt}` : 'Saved')
-                : 'Unsaved — autosave ใน 5 วิ'}
-          </span>
-        </div>
-
         {/* Submit */}
         <button onClick={onSubmit}
-          disabled={!submitEnabled}
+          disabled={!submitEnabled || isSaved}
           className={clsx(
-            'btn w-full text-sm action-pill',
-            submitEnabled
-              ? 'btn-primary'
-              : 'opacity-40 cursor-not-allowed bg-slate-800 text-slate-500 border border-transparent'
+            'cart-save-button btn w-full text-sm action-pill',
+            isSaved
+              ? 'is-saved'
+              : submitEnabled
+                ? 'btn-primary'
+                : 'opacity-40 cursor-not-allowed bg-slate-800 text-slate-500 border border-transparent'
           )}
-          style={submitEnabled ? {
+          style={!isSaved && submitEnabled ? {
             background: `linear-gradient(135deg, ${color}, ${color}aa)`,
             boxShadow: `0 0 20px ${color}30`,
           } : undefined}>
-          {isSyncing ? 'Sending to admin...'
+          {isSyncing ? syncLabel
+            : isSaved ? (
+              <span className="flex items-center justify-center gap-2">
+                <CheckCircle2 size={16} />
+                Saved
+              </span>
+            )
             : !isOpen ? '🔒 ปิดรับการลงทุน'
             : isDisasterPhase && !disasterOpen ? 'King is choosing disaster'
             : isDisasterPhase && kingDisaster == null ? 'Select disaster ID'
@@ -336,6 +331,11 @@ function BiddingCart({
               </span>
             )}
         </button>
+        {isSaved && isOpen && !isSyncing && (
+          <div className="cart-save-helper">
+            ผู้เล่นยังสามารถแก้ไขข้อมูลได้จนกว่าจะหมดเวลา
+          </div>
+        )}
       </div>
     </div>
   )

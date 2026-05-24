@@ -16,9 +16,9 @@ interface MapProps {
 }
 
 const GROUPS = [
-  { id:'A', areas:['A1','A2','A3','A4','A5'],               income:'180%', dis:'90%' },
-  { id:'B', areas:['B1','B2','B3','B4','B5','B6'],          income:'160%', dis:'80%' },
-  { id:'C', areas:['C1','C2','C3','C4','C5','C6','C7','C8','C9'], income:'140%', dis:'70%' },
+  { id:'A', areas:['A1','A2','A3','A4','A5'],               income:'180%', dis:'50%' },
+  { id:'B', areas:['B1','B2','B3','B4','B5','B6'],          income:'160%', dis:'50%' },
+  { id:'C', areas:['C1','C2','C3','C4','C5','C6','C7','C8','C9'], income:'140%', dis:'50%' },
   { id:'D', areas:['KING'],                                 income:'King', dis:'choose D' },
 ]
 
@@ -72,9 +72,14 @@ function GameMap({
             <div className="map-group-header">
               <div className="map-group-copy min-w-0">
                 <span className="font-display font-semibold text-sm text-slate-200">Group {group.id}</span>
-                <div className="map-group-meta">
-                  <span className="badge badge-green text-green-500" style={{ fontSize: '0.55rem' }}>+{group.income}</span>
-                  <span className="badge badge-red text-red-500" style={{ fontSize: '0.55rem' }}>dis {group.dis}</span>
+                <div className="map-group-meta map-group-meta-stack">
+                  <span className="badge badge-green text-green-500">+{group.income}</span>
+                  {group.id === 'D' && (
+                    <span className="badge badge-green text-green-500">+Choose Dis</span>
+                  )}
+                  {group.id !== 'D' && (
+                    <span className="badge badge-red text-red-500">dis {group.dis}</span>
+                  )}
                 </div>
               </div>
             </div>

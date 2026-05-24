@@ -484,21 +484,6 @@ export default function GroupChat({
                   ))}
                 </select>
               </label>
-              {mode !== 'report' && (
-                <div className="group-chat-channel-pills" aria-label="Chat channels">
-                {channelOptions.map(option => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    onClick={() => setChannelFilter(option.value)}
-                    className={clsx('group-chat-channel-pill', channelFilter === option.value && 'active')}
-                  >
-                    <span>{option.label}</span>
-                    {hasUnreadChannel(option.value) && <span className="group-chat-channel-dot" />}
-                  </button>
-                ))}
-                </div>
-              )}
             </div>
 
             <div ref={listRef} className="group-chat-list">

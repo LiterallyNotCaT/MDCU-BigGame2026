@@ -14,6 +14,7 @@ interface HistoryEntry {
   wave?: number
   label: string
   detail?: string
+  detailItems?: string[]
   amount: number
   type: HistoryType
   timestamp?: string
@@ -49,7 +50,7 @@ interface FinanceHistoryProps {
 }
 
 const HIDDEN_RESULTS_NOTICE =
-  'Current wave results are hidden. Previous waves are shown; current balance uses this wave starting money minus submitted spending.'
+  'Current wave results are hidden'
 
 const parseGViz = (text: string): any[] => {
   const js = text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\)/)?.[1]
@@ -139,6 +140,22 @@ const fetchLadderRanking = async (wave: number): Promise<MiniGameRank[]> => {
     const rankB = b.rank ?? Number.POSITIVE_INFINITY
     return rankA - rankB || (a.baan ?? 99) - (b.baan ?? 99)
   })
+}
+
+const fetchEventRank = async (wave: number, baan: number) => {
+  if (wave !== 2 && wave !== 4) return null
+  try {
+    const res = await fetch(`/api/event/status?wave=${wave}`, { cache: 'no-store' })
+    if (!res.ok) return null
+    const data = await res.json()
+    const match = Array.isArray(data?.results)
+      ? data.results.find((item: any) => Number(item?.baan) === baan)
+      : null
+    const rank = Number(match?.rank)
+    return Number.isFinite(rank) && rank > 0 ? rank : null
+  } catch {
+    return null
+  }
 }
 
 const affectedAreasFor = (disaster: number | null) => {
@@ -234,15 +251,52 @@ function FinanceHistory({
       let morningAdded = false
 
       for (const wave of wavesToRead) {
-        const rows = await fetchSheetRows(getWaveSheetQuery(wave))
-        const row = rows.find((r: any) => parseInt(String(r?.c?.[0]?.v ?? '')) === selectedBaan)
+        const [rows, islandRangeRows] = await Promise.all([
+          fetchSheetRows(getWaveSheetQuery(wave)),
+          fetchSheetRows(`${getWaveSheetQuery(wave)}&range=${encodeURIComponent('A5:P16')}`),
+        ])
+        const row = rows.find((r: any) => parseInt(String(cellValue(r?.c?.[0]) ?? '')) === selectedBaan)
         if (!row) continue
 
         const c = row.c ?? []
-        const read = (idx: number) => c?.[idx]?.v
-        const numberAt = (idx: number) => parseFloat(String(read(idx) ?? 0)) || 0
+        const islandRangeRow = islandRangeRows.find((r: any) => parseInt(String(cellValue(r?.c?.[0]) ?? '')) === selectedBaan)
+        const islandRangeCells = islandRangeRow?.c ?? []
+        const read = (idx: number) => cellValue(c?.[idx])
+        const hasTextValue = (value: unknown) => String(value ?? '').trim() !== ''
+        const numberAt = (idx: number) => parseSheetNumber(read(idx)) ?? 0
         const textAt = (idx: number) => String(read(idx) ?? '').trim()
         const hasCellValue = (idx: number) => textAt(idx) !== ''
+        const islandRangeRead = (localIdx: number) => {
+          return cellValue(islandRangeCells?.[localIdx + 7])
+        }
+        const islandRangeTextAt = (localIdx: number) => String(islandRangeRead(localIdx) ?? '').trim()
+        const islandRangeNumberAt = (localIdx: number) => parseSheetNumber(islandRangeRead(localIdx)) ?? 0
+        const areaAt = (nameIdx: number, amountIdx: number, returnIdx: number) => {
+          const normalizeArea = (value: string) => {
+            const match = value.toUpperCase().match(/\b[ABC][1-9]\b/)
+            return match?.[0] ?? ''
+          }
+          const direct = normalizeArea(textAt(nameIdx))
+          if (direct) return direct
+
+          // GViz can sometimes expose formatted cells oddly. Keep the fixed sheet map,
+          // but scan the neighboring island cells so the amount never shows as "-: 100".
+          const candidates = [
+            nameIdx - 1,
+            nameIdx,
+            nameIdx + 1,
+            amountIdx - 1,
+            amountIdx + 1,
+            returnIdx - 2,
+            returnIdx - 1,
+          ]
+          for (const idx of candidates) {
+            if (idx < 0 || idx >= c.length) continue
+            const area = normalizeArea(textAt(idx))
+            if (area) return area
+          }
+          return ''
+        }
         const startingBalance = numberAt(1)
         const isCurrentWave = wave === currentWave
         const revealWave = showResults || !isCurrentWave
@@ -252,21 +306,20 @@ function FinanceHistory({
           nextEntries.push({
             order: 0,
             label: 'Morning score',
-            detail: 'Wave 1 starting money from B5:B16',
             amount: startingBalance,
             type: startingBalance >= 0 ? 'income' : 'lose',
           })
           morningAdded = true
         }
 
-        const waveKing = parseInt(String(rows?.[19]?.c?.[7]?.v ?? ''))
+        const waveKing = parseInt(String(cellValue(rows?.[19]?.c?.[7]) ?? ''))
         const kingHouse = isNaN(waveKing) ? null : waveKing
-        const waveDisasterRaw = parseInt(String(rows?.[21]?.c?.[7]?.v ?? ''))
+        const waveDisasterRaw = parseInt(String(cellValue(rows?.[21]?.c?.[7]) ?? ''))
         const waveDisaster = isNaN(waveDisasterRaw) ? null : waveDisasterRaw
         const affectedAreas = affectedAreasFor(waveDisaster)
-        const winnerRow = rows.find((r: any) => String(r?.c?.[6]?.v ?? '').trim() === '1')
-        const winningKingHouse = winnerRow ? parseInt(String(winnerRow?.c?.[0]?.v ?? '')) : null
-        const winningKingBid = winnerRow ? parseFloat(String(winnerRow?.c?.[5]?.v ?? 0)) || 0 : 0
+        const winnerRow = rows.find((r: any) => String(cellValue(r?.c?.[6]) ?? '').trim() === '1')
+        const winningKingHouse = winnerRow ? parseInt(String(cellValue(winnerRow?.c?.[0]) ?? '')) : null
+        const winningKingBid = winnerRow ? parseSheetNumber(cellValue(winnerRow?.c?.[5])) ?? 0 : 0
         const currentKingGain = numberAt(23)
         const bonusIslandAmount = wave === 2 ? numberAt(22) : 0
         const ladderAmount = wave === 2 || wave === 4 ? numberAt(24) : 0
@@ -280,11 +333,12 @@ function FinanceHistory({
         const betAmountSheet = numberAt(3)
         const betReturn = numberAt(4)
         if (betHouse || betAmountSheet) {
+          const betHouseNumber = parseInt(betHouse)
           nextEntries.push({
             order: wave * 100 + 10,
             wave,
             label: 'Bet',
-            detail: `House ${betHouse || '-'} · spent ${betAmountSheet.toLocaleString()}`,
+            detail: !isNaN(betHouseNumber) ? `แทงบ้าน ${betHouseNumber}` : undefined,
             amount: -betAmountSheet,
             type: 'bet',
           })
@@ -297,7 +351,6 @@ function FinanceHistory({
             order: wave * 100 + 20,
             wave,
             label: 'King bid',
-            detail: `King bid ${kingAmount.toLocaleString()}`,
             amount: -kingAmount,
             type: 'bet',
           })
@@ -307,21 +360,28 @@ function FinanceHistory({
         const islandReturnLines: string[] = []
         let islandSpentTotal = 0
         let islandReturnTotal = 0
-        ;[[7, 8, 9], [10, 11, 12], [13, 14, 15]].forEach(([nameIdx, amountIdx, returnIdx]) => {
-          const area = textAt(nameIdx)
-          const spent = numberAt(amountIdx)
-          const got = numberAt(returnIdx)
+        ;[
+          { range: [0, 1, 2], full: [7, 8, 9] },
+          { range: [3, 4, 5], full: [10, 11, 12] },
+          { range: [6, 7, 8], full: [13, 14, 15] },
+        ].forEach(({ range, full }) => {
+          const [rangeNameIdx, rangeAmountIdx, rangeReturnIdx] = range
+          const [nameIdx, amountIdx, returnIdx] = full
+          const exactArea = islandRangeTextAt(rangeNameIdx).toUpperCase().match(/\b[ABC][1-9]\b/)?.[0] ?? ''
+          const area = exactArea || areaAt(nameIdx, amountIdx, returnIdx)
+          const spent = hasTextValue(islandRangeRead(rangeAmountIdx)) ? islandRangeNumberAt(rangeAmountIdx) : numberAt(amountIdx)
+          const got = hasTextValue(islandRangeRead(rangeReturnIdx)) ? islandRangeNumberAt(rangeReturnIdx) : numberAt(returnIdx)
           if (area || spent) {
             islandBidLines.push(`${area || '-'}: ${spent.toLocaleString()}`)
             islandSpentTotal += spent
           }
           if (area || spent || got) {
-            const status = got <= 0
-              ? 'lose'
-              : affectedAreas.has(area)
-                ? 'win, but disaster-ed'
-                : `win, ${formatPercent(got, spent)}`
-            islandReturnLines.push(`${area || '-'}: ${got.toLocaleString()} (${status})`)
+            const suffix = area && affectedAreas.has(area)
+              ? ' (โดน disaster)'
+              : got <= 0
+                ? ' (ประมูลแพ้)'
+                : ''
+            islandReturnLines.push(`${area || '-'}: ${got.toLocaleString()}${suffix}`)
             islandReturnTotal += got
           }
         })
@@ -353,16 +413,20 @@ function FinanceHistory({
           latestBalance = startingBalance - betAmountSheet - kingAmount - islandSpentTotal
         }
 
+        const eventAmount = numberAt(19)
+        const eventRank = revealWave && eventAmount ? await fetchEventRank(wave, selectedBaan) : null
         const extras = [
           { label: 'MiniGame', amount: numberAt(17) },
           { label: 'MoneyDrop', amount: numberAt(18) },
-          { label: 'Event', amount: numberAt(19) },
+          {
+            label: eventRank ? `Event · ตอบถูกเป็นลำดับที่ ${eventRank}` : 'Event',
+            amount: eventAmount,
+          },
         ].filter(x => x.amount)
         if (revealWave) extras.forEach((x, idx) => nextEntries.push({
           order: wave * 100 + 40 + idx,
           wave,
           label: x.label,
-          detail: 'Gain from other game',
           amount: x.amount,
           type: x.amount >= 0 ? 'income' : 'lose',
           revealResult: isCurrentWave,
@@ -373,7 +437,6 @@ function FinanceHistory({
             order: wave * 100 + 45,
             wave,
             label: 'บันไดงู',
-            detail: 'Score from Y column',
             amount: ladderAmount,
             type: 'income',
             revealResult: isCurrentWave,
@@ -384,19 +447,16 @@ function FinanceHistory({
           const resultEntries = [
             {
               label: 'Current king gain',
-              detail: 'Current king bonus from X column',
               amount: currentKingGain,
               order: wave * 100 + 44,
             },
             {
               label: 'Bonus island',
-              detail: 'Bonus island score from W column',
               amount: bonusIslandAmount,
               order: wave * 100 + 46,
             },
             {
               label: 'Honesty',
-              detail: 'Honesty score from Z column',
               amount: honestyAmount,
               order: wave * 100 + 47,
             },
@@ -406,7 +466,6 @@ function FinanceHistory({
             order: x.order,
             wave,
             label: x.label,
-            detail: x.detail,
             amount: x.amount,
             type: x.amount >= 0 ? 'income' : 'lose',
             revealResult: isCurrentWave,
@@ -417,7 +476,6 @@ function FinanceHistory({
               order: wave * 100 + 48,
               wave,
               label: adminLabel,
-              detail: 'Admin adjustment',
               amount: adminAmount,
               type: adminAmount >= 0 ? 'income' : 'lose',
               revealResult: isCurrentWave,
@@ -443,8 +501,7 @@ function FinanceHistory({
           nextEntries.push({
             order: wave * 100 + 60,
             wave,
-            label: betReturn > 0 ? 'Bet return: win' : 'Bet return: lose',
-            detail: `Return ${betReturn.toLocaleString()}`,
+            label: `Bet return: +${formatPercent(betReturn, betAmountSheet)}`,
             amount: betReturn,
             type: betReturn > 0 ? 'reward' : 'lose',
             betTarget: !isNaN(parsedBetTarget) ? parsedBetTarget : undefined,
@@ -455,7 +512,7 @@ function FinanceHistory({
           nextEntries.push({
             order: wave * 100 + 70,
             wave,
-            label: islandReturnTotal > 0 ? 'Island return' : 'Island return: lose',
+            label: 'Island return',
             detail: islandReturnLines.join('\n'),
             amount: islandReturnTotal,
             type: islandReturnTotal > 0 ? 'income' : 'lose',
@@ -538,7 +595,7 @@ function FinanceHistory({
   return (
     <div className={clsx('finance-history space-y-3', className)}>
       {!showResults && HIDDEN_RESULTS_NOTICE && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+        <div className="history-hidden-notice">
           {HIDDEN_RESULTS_NOTICE}
         </div>
       )}
@@ -638,7 +695,6 @@ function FinanceHistory({
                         >
                           <div className="mini-game-ranking-number">{row.rank ?? '-'}</div>
                           <div className="mini-game-ranking-copy">
-                            <div className="mini-game-ranking-label">อันดับที่ {row.rank ?? '-'}</div>
                             <div className="mini-game-ranking-house">
                               {row.baan ? HOUSE_NAMES[row.baan] : '-'}
                             </div>
