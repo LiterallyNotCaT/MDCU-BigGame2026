@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
+import { auth, isAllowedDocChulaEmail } from '@/auth'
 import { callGas } from '@/lib/gas'
+import { callOAuthGas } from '@/lib/oauthGas'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -14,6 +16,20 @@ export async function POST(req: Request) {
   }
 
   try {
+    if (payload.oauth === true) {
+      const session = await auth()
+      const email = session?.user?.email ?? ''
+      if (!session?.user || !isAllowedDocChulaEmail(email)) {
+        return NextResponse.json({ ok: false, message: 'Unauthorized' }, { status: 401 })
+      }
+      const data = await callOAuthGas({
+        ...payload,
+        email,
+        action: 'setFormRoundControlOAuth',
+      })
+      return NextResponse.json({ ok: true, message: data.message || 'Updated', data })
+    }
+
     const data = await callGas({
       ...payload,
       action: 'setFormRoundControl',

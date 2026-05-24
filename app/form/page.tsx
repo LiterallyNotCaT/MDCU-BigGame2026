@@ -9,5 +9,5 @@ export default async function FormPage() {
   if (!session?.user) redirect('/form/login')
   if (!isAllowedDocChulaEmail(email)) redirect('/form/login-failed')
 
-  return <FormClient />
+  return <FormClient oauthEmail={email} />
 }

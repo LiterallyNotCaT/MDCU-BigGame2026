@@ -1,12 +1,18 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import clsx from 'clsx'
 import { signOut } from 'next-auth/react'
-import { CheckCircle2, Clock, FileSpreadsheet, KeyRound, Lock, LogOut, RefreshCw, Send, ShieldCheck, Unlock } from 'lucide-react'
+import { CheckCircle2, Clock, Eye, FileSpreadsheet, KeyRound, Lock, LogOut, RefreshCw, Send, ShieldCheck, Unlock } from 'lucide-react'
 import ContactFooter from '@/components/ContactFooter'
 import GroupChat from '@/components/GroupChat'
 import HomeButton from '@/components/HomeButton'
+import {
+  canOAuthEditForm,
+  canOAuthViewForm,
+  isOAuthAdmin,
+  type OAuthFormProfile,
+} from '@/lib/formPermissions'
 import {
   formatHouseList,
   normalizeHouseText,
@@ -22,6 +28,7 @@ type Session = {
   role: FormRole
   username: string
   password: string
+  authMode?: 'password' | 'oauth'
 }
 
 const FORM_TABS = ['เช้าล่าง', 'เช้าบน', 'Games บ่าย']
@@ -186,7 +193,7 @@ async function fetchJson<T>(url: string, init?: RequestInit & { timeoutMs?: numb
   return data
 }
 
-export default function FormClient() {
+export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
   const [forms, setForms] = useState<ScoringFormConfig[]>([])
   const [tab, setTab] = useState(FORM_TABS[0])
   const [formKey, setFormKey] = useState('')
@@ -208,10 +215,17 @@ export default function FormClient() {
   const [savingRound, setSavingRound] = useState<number | null>(null)
   const [controlBusy, setControlBusy] = useState(false)
   const [notice, setNotice] = useState<{ type: 'ok' | 'err' | 'warn'; text: string } | null>(null)
+  const [oauthProfile, setOauthProfile] = useState<OAuthFormProfile | null>(null)
+  const [oauthLoading, setOauthLoading] = useState(true)
+  const [oauthError, setOauthError] = useState('')
+  const didRouteOauthProfile = useRef(false)
   const grouped = useMemo(() => groupByTab(forms), [forms])
   const currentForms = grouped[tab] ?? []
   const currentForm = forms.find(form => form.formKey === formKey) ?? currentForms[0] ?? null
   const currentState = currentForm && state?.form.formKey === currentForm.formKey ? state : null
+  const oauthIsAdmin = isOAuthAdmin(oauthProfile)
+  const oauthCanViewCurrent = canOAuthViewForm(oauthProfile, currentForm)
+  const oauthCanEditCurrent = canOAuthEditForm(oauthProfile, currentForm)
   const reportTargets = useMemo(() => {
     const seen = new Set<string>()
     const targetForms = tab === FORM_TABS[2]
@@ -224,13 +238,22 @@ export default function FormClient() {
       return [{ value, label: value }]
     })
   }, [forms, tab])
-  const session = currentForm ? adminSession ?? sessions[currentForm.formKey] ?? null : adminSession
-  const canSeeContent = Boolean(currentForm && (adminSession || sessions[currentForm.formKey]))
-  const canLoadSelectedForm = Boolean(formKey && (adminSession || sessions[formKey]))
+  const oauthSession: Session | null = (currentForm && oauthCanViewCurrent) || oauthIsAdmin
+    ? {
+      role: oauthIsAdmin ? 'admin' : 'staff',
+      username: oauthProfile?.nickname || oauthProfile?.email || oauthEmail,
+      password: '',
+      authMode: 'oauth',
+    }
+    : null
+  const session = currentForm ? oauthSession ?? adminSession ?? sessions[currentForm.formKey] ?? null : oauthSession ?? adminSession
+  const canSeeContent = Boolean(currentForm && (oauthCanViewCurrent || adminSession || sessions[currentForm.formKey]))
+  const canLoadSelectedForm = Boolean(formKey && (oauthCanViewCurrent || adminSession || sessions[formKey]))
   const isAdmin = session?.role === 'admin'
+  const canEditCurrentForm = Boolean(isAdmin || oauthCanEditCurrent || (currentForm && sessions[currentForm.formKey]))
   const selectedRoundMeta = currentState?.rounds[selectedRound] ?? null
   const selectedIsTimedOut = Boolean(selectedRoundMeta?.deadlineAt && Date.now() > new Date(selectedRoundMeta.deadlineAt).getTime())
-  const selectedCanEdit = Boolean(currentState && session && (isAdmin || (!selectedRoundMeta?.confirmed && !selectedRoundMeta?.locked && !selectedIsTimedOut)))
+  const selectedCanEdit = Boolean(currentState && session && canEditCurrentForm && (isAdmin || (!selectedRoundMeta?.confirmed && !selectedRoundMeta?.locked && !selectedIsTimedOut)))
 
   const notify = (type: 'ok' | 'err' | 'warn', text: string) => {
     setNotice({ type, text })
@@ -249,6 +272,21 @@ export default function FormClient() {
       notify('err', error instanceof Error ? error.message : String(error))
     } finally {
       setLoadingConfig(false)
+    }
+  }, [])
+
+  const refreshOAuthProfile = useCallback(async () => {
+    setOauthLoading(true)
+    setOauthError('')
+    try {
+      const data = await fetchJson<{ profile: OAuthFormProfile }>('/api/forms/oauth')
+      setOauthProfile(data.profile)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setOauthError(message)
+      notify('err', message)
+    } finally {
+      setOauthLoading(false)
     }
   }, [])
 
@@ -321,7 +359,7 @@ export default function FormClient() {
     setStateLoadError('')
     try {
       if (adminSession && selectedForm) {
-        const loadedStates = await loadAdminStatesForTab(adminSession.password, selectedForm.tab)
+        const loadedStates = await loadAdminStatesForTab(adminSession?.password ?? '', selectedForm.tab)
         const selectedState = loadedStates[nextFormKey]
         if (selectedState) {
           applyFormState(selectedState)
@@ -352,6 +390,20 @@ export default function FormClient() {
   useEffect(() => {
     refreshConfig()
   }, [refreshConfig])
+
+  useEffect(() => {
+    refreshOAuthProfile()
+  }, [refreshOAuthProfile])
+
+  useEffect(() => {
+    if (didRouteOauthProfile.current || oauthLoading || !oauthProfile || !forms.length) return
+    const editableTarget = forms.find(form => canOAuthEditForm(oauthProfile, form))
+    const viewTarget = editableTarget ?? forms.find(form => canOAuthViewForm(oauthProfile, form))
+    if (!viewTarget) return
+    didRouteOauthProfile.current = true
+    setTab(viewTarget.tab)
+    setFormKey(viewTarget.formKey)
+  }, [forms, oauthLoading, oauthProfile])
 
   useEffect(() => {
     if (!formKey) return
@@ -404,7 +456,7 @@ export default function FormClient() {
       const statesData = await loadAdminStatesForTab(adminInput, currentForm?.tab ?? tab)
       const selectedState = formKey ? statesData?.[formKey] : null
       if (selectedState) applyFormState(selectedState)
-      setAdminSession({ role: 'admin', username: 'Admin', password: adminInput })
+      setAdminSession({ role: 'admin', username: 'Admin', password: adminInput, authMode: 'password' })
       setAdminInput('')
       setShowAdminLogin(false)
       notify('ok', 'Admin unlocked all form tabs')
@@ -440,6 +492,10 @@ export default function FormClient() {
 
   const confirmRound = async (roundIndex: number) => {
     if (!currentState || !session) return
+    if (!isAdmin && !canEditCurrentForm) {
+      notify('warn', 'This form is view-only for your account.')
+      return
+    }
     const round = currentState.rounds[roundIndex]
     if (!isAdmin && (round.confirmed || round.locked)) {
       notify('warn', 'This round is already locked or confirmed.')
@@ -460,6 +516,7 @@ export default function FormClient() {
         body: JSON.stringify({
           formKey: currentState.form.formKey,
           password: session.password,
+          oauth: session.authMode === 'oauth',
           admin: isAdmin,
           roundIndex,
           fillToRank,
@@ -512,14 +569,15 @@ export default function FormClient() {
   }
 
   const setRoundControl = async (roundIndex: number, patch: Record<string, unknown>) => {
-    if (!currentState || !adminSession) return
+    if (!currentState || (!adminSession && !oauthIsAdmin)) return
     setControlBusy(true)
     try {
       await fetchJson('/api/forms/control', {
         method: 'POST',
         body: JSON.stringify({
           formKey: currentState.form.formKey,
-          password: adminSession.password,
+          password: adminSession?.password ?? '',
+          oauth: oauthIsAdmin,
           roundIndex,
           ...patch,
         }),
@@ -585,6 +643,7 @@ export default function FormClient() {
   const showAutoControls = Boolean(currentState && usesAutoRemainder)
   const effectiveSelectedAutoRow = usesAutoRemainder ? selectedAutoRow : -1
   const headerTitle = session ? `Staff Form for ${session.username}` : 'Staff Form'
+  const profileLabel = oauthProfile?.nickname || oauthEmail
 
   return (
     <div className="wire-page-full form-page">
@@ -597,35 +656,26 @@ export default function FormClient() {
         </div>
         <div className="form-topbar-actions">
           {session?.role === 'staff' && <GroupChat actor={session.username} label="Report" mode="report" />}
-          {adminSession && <GroupChat actor="admin" label="Report" mode="report" reportTargets={reportTargets} />}
-          {adminSession ? (
-            <button type="button" className="btn form-admin-status-button" onClick={() => setAdminSession(null)}>
+          {(adminSession || oauthIsAdmin) && <GroupChat actor="admin" label="Report" mode="report" reportTargets={reportTargets} />}
+          {oauthProfile && (
+            <div className="form-user-badge">
+              <strong>Hello, {profileLabel}</strong>
+              <span>หน้าที่: {oauthProfile.job || '-'}</span>
+              <span>Role: {oauthProfile.role}</span>
+            </div>
+          )}
+          {(adminSession || oauthIsAdmin) && (
+            <button
+              type="button"
+              className="btn form-admin-status-button"
+              onClick={adminSession ? () => setAdminSession(null) : undefined}
+            >
               <ShieldCheck size={15} /> Admin
-            </button>
-          ) : (
-            <button type="button" className="btn form-admin-login-button" onClick={() => setShowAdminLogin(value => !value)}>
-              <ShieldCheck size={15} /> Login as admin
             </button>
           )}
           <button type="button" className="btn form-logout-button" onClick={logoutGoogle}>
             <LogOut size={15} /> Log out
           </button>
-          {showAdminLogin && !adminSession && (
-            <div className="form-admin-popover">
-              <input
-                type="password"
-                value={adminInput}
-                onChange={event => setAdminInput(event.target.value)}
-                onKeyDown={event => { if (event.key === 'Enter') loginAdmin() }}
-                placeholder="Admin password"
-                className="input-base"
-                autoFocus
-              />
-              <button type="button" onClick={loginAdmin} className="btn btn-primary" disabled={!adminInput.trim()}>
-                Unlock
-              </button>
-            </div>
-          )}
         </div>
       </header>
 
@@ -644,8 +694,12 @@ export default function FormClient() {
                   key={item}
                   type="button"
                   onClick={() => {
+                    const targetForms = grouped[item] ?? []
+                    const targetForm = targetForms.find(form => canOAuthEditForm(oauthProfile, form))
+                      ?? targetForms.find(form => canOAuthViewForm(oauthProfile, form))
+                      ?? targetForms[0]
                     setTab(item)
-                    setFormKey(grouped[item]?.[0]?.formKey ?? '')
+                    setFormKey(targetForm?.formKey ?? '')
                     setPasswordInput('')
                   }}
                   className={clsx('btn', tab === item ? 'btn-primary' : 'btn-ghost')}
@@ -656,7 +710,7 @@ export default function FormClient() {
             </div>
 
             <div className="form-subtabs">
-              {loadingConfig ? (
+              {loadingConfig || oauthLoading ? (
                 <div className="form-loading">Loading forms...</div>
               ) : currentForms.map(form => (
                 <button
@@ -666,16 +720,31 @@ export default function FormClient() {
                     setFormKey(form.formKey)
                     setPasswordInput('')
                   }}
-                  className={clsx('form-subtab', form.formKey === currentForm?.formKey && 'active')}
+                  className={clsx(
+                    'form-subtab',
+                    form.formKey === currentForm?.formKey && 'active',
+                    canOAuthViewForm(oauthProfile, form) && !canOAuthEditForm(oauthProfile, form) && 'view-only',
+                  )}
                 >
                   <span>{form.user}</span>
-                  {adminSession || sessions[form.formKey] ? <CheckCircle2 size={14} /> : <Lock size={13} />}
+                  {adminSession || sessions[form.formKey] || canOAuthEditForm(oauthProfile, form)
+                    ? <CheckCircle2 size={14} />
+                    : canOAuthViewForm(oauthProfile, form)
+                      ? <Eye size={13} />
+                      : <Lock size={13} />}
                 </button>
               ))}
             </div>
 
             {!currentForm ? (
               <div className="form-empty-state">No form config found.</div>
+            ) : oauthError ? (
+              <div className="form-empty-state">
+                <div>{oauthError}</div>
+                <button type="button" onClick={refreshOAuthProfile} className="btn btn-primary">
+                  <RefreshCw size={14} /> Retry
+                </button>
+              </div>
             ) : !canSeeContent ? (
               <div className="form-unlock-card">
                 <div className="form-unlock-icon"><KeyRound size={22} /></div>
@@ -760,7 +829,7 @@ export default function FormClient() {
                       </label>
                     </>
                   )}
-                  {adminSession && selectedRoundMeta && (
+                  {(adminSession || oauthIsAdmin) && selectedRoundMeta && (
                     <div className="form-admin-controls">
                       <button type="button" disabled={controlBusy} onClick={() => setRoundControl(selectedRound, { locked: !selectedRoundMeta.locked })} className="btn btn-ghost">
                         {selectedRoundMeta.locked ? <Unlock size={13} /> : <Lock size={13} />}
@@ -791,7 +860,7 @@ export default function FormClient() {
                         <tr key={`${label}-${rowIndex}`} className={clsx(rowIndex === effectiveSelectedAutoRow && 'auto-row')}>
                           <th>{isScoreInputForm ? (label || `บ้าน ${rowIndex + 1}`) : (label || `Rank ${rowIndex + 1}`)}</th>
                           {visibleRounds.map((round, roundIndex) => {
-                            const editable = Boolean(session && (isAdmin || (!round.confirmed && !round.locked && !(round.deadlineAt && Date.now() > new Date(round.deadlineAt).getTime()))))
+                            const editable = Boolean(session && canEditCurrentForm && (isAdmin || (!round.confirmed && !round.locked && !(round.deadlineAt && Date.now() > new Date(round.deadlineAt).getTime()))))
                             const isAuto = usesAutoRemainder && rowIndex === fillToRank
                             const manualValues = draft.slice(0, fillToRank).map(row => row[roundIndex] ?? '')
                             const enteredHouseCount = new Set(manualValues.flatMap(value => parseHouseList(value))).size
@@ -817,7 +886,7 @@ export default function FormClient() {
                         <tr className="form-participant-row">
                           <th>Playing</th>
                           {visibleRounds.map((round, roundIndex) => {
-                            const editable = Boolean(session && (isAdmin || (!round.confirmed && !round.locked && !(round.deadlineAt && Date.now() > new Date(round.deadlineAt).getTime()))))
+                            const editable = Boolean(session && canEditCurrentForm && (isAdmin || (!round.confirmed && !round.locked && !(round.deadlineAt && Date.now() > new Date(round.deadlineAt).getTime()))))
                             return (
                               <td key={round.index} className={clsx(selectedRound === roundIndex && 'active-round')}>
                                 <input
@@ -837,7 +906,7 @@ export default function FormClient() {
                         <th>Confirm</th>
                         {visibleRounds.map((round, roundIndex) => {
                           const timedOut = Boolean(round.deadlineAt && Date.now() > new Date(round.deadlineAt).getTime())
-                          const disabled = savingRound !== null || (!isAdmin && (round.confirmed || round.locked || timedOut))
+                          const disabled = savingRound !== null || !canEditCurrentForm || (!isAdmin && (round.confirmed || round.locked || timedOut))
                           return (
                             <td key={round.index} className={clsx(selectedRound === roundIndex && 'active-round')}>
                               <button

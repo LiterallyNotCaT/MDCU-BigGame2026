@@ -42,5 +42,6 @@ next-env.d.ts
 
 .vercel
 .env*.local
+oauth.gs
 # next-agents-md
 .next-docs/
