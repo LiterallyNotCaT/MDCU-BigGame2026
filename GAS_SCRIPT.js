@@ -453,7 +453,7 @@ function handleAuthAccess(payload) {
 }
 
 function formConfigCacheKey_(includePasswords) {
-  return `FORM_CONFIG_V11_${includePasswords ? 'private' : 'public'}`
+  return `FORM_CONFIG_V12_${includePasswords ? 'private' : 'public'}`
 }
 
 function formAdminPasswordCacheKey_() {
@@ -483,10 +483,12 @@ function inferFormMeta_(tab, user) {
     return { kind: 'match-single', defaultFillToRank: 1, allowTies: false, blank: false, rankCount: 2, maxRounds: 6, usesAutoRemainder: false, autoAfterHouseCount: 0 }
   }
   if (normalized.indexOf('escape') >= 0 && String(tab) === 'เช้าบน') {
-    return { kind: 'ranking-single', defaultFillToRank: 6, allowTies: false, blank: false, rankCount: 6, maxRounds: 2, usesAutoRemainder: false, autoAfterHouseCount: 0 }
+    return { kind: 'ranking-single', defaultFillToRank: 6, allowTies: false, blank: false, rankCount: 7, maxRounds: 2, usesAutoRemainder: true, autoAfterHouseCount: 6 }
   }
   if (normalized.indexOf('stacking block') >= 0 || normalized.indexOf('escape') >= 0) {
-    return { kind: 'ranking-single', defaultFillToRank: 4, allowTies: false, blank: false, rankCount: 4, maxRounds: normalized.indexOf('escape') >= 0 ? 2 : 6, usesAutoRemainder: false, autoAfterHouseCount: 0 }
+    return normalized.indexOf('escape') >= 0
+      ? { kind: 'ranking-single', defaultFillToRank: 6, allowTies: false, blank: false, rankCount: 7, maxRounds: 2, usesAutoRemainder: true, autoAfterHouseCount: 6 }
+      : { kind: 'ranking-single', defaultFillToRank: 4, allowTies: false, blank: false, rankCount: 4, maxRounds: 6, usesAutoRemainder: false, autoAfterHouseCount: 0 }
   }
   return { kind: 'ranking-group', defaultFillToRank: 3, allowTies: true, blank: false, rankCount: 4, maxRounds: String(tab) === 'เช้าบน' ? 4 : 0, usesAutoRemainder: true, autoAfterHouseCount: 3 }
 }

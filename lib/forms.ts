@@ -75,10 +75,12 @@ export function inferFormKind(
     return { kind: 'match-single', defaultFillToRank: 1, allowTies: false, blank: false, rankCount: 2, maxRounds: 6, usesAutoRemainder: false, autoAfterHouseCount: 0 }
   }
   if (normalized.includes('escape') && tab === 'เช้าบน') {
-    return { kind: 'ranking-single', defaultFillToRank: 6, allowTies: false, blank: false, rankCount: 6, maxRounds: 2, usesAutoRemainder: false, autoAfterHouseCount: 0 }
+    return { kind: 'ranking-single', defaultFillToRank: 6, allowTies: false, blank: false, rankCount: 7, maxRounds: 2, usesAutoRemainder: true, autoAfterHouseCount: 6 }
   }
   if (normalized.includes('stacking block') || normalized.includes('escape')) {
-    return { kind: 'ranking-single', defaultFillToRank: 4, allowTies: false, blank: false, rankCount: 4, maxRounds: normalized.includes('escape') ? 2 : 6, usesAutoRemainder: false, autoAfterHouseCount: 0 }
+    return normalized.includes('escape')
+      ? { kind: 'ranking-single', defaultFillToRank: 6, allowTies: false, blank: false, rankCount: 7, maxRounds: 2, usesAutoRemainder: true, autoAfterHouseCount: 6 }
+      : { kind: 'ranking-single', defaultFillToRank: 4, allowTies: false, blank: false, rankCount: 4, maxRounds: 6, usesAutoRemainder: false, autoAfterHouseCount: 0 }
   }
   return { kind: 'ranking-group', defaultFillToRank: 3, allowTies: true, blank: false, rankCount: 4, maxRounds: tab === 'เช้าบน' ? 4 : 0, usesAutoRemainder: true, autoAfterHouseCount: 3 }
 }

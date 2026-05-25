@@ -370,12 +370,12 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     (grouped[tabName] ?? []).filter(form => !form.blank).map(form => form.formKey)
   ), [grouped])
 
-  const loadAdminStatesForTab = useCallback(async (password: string, tabName: string) => {
+  const loadStatesForTab = useCallback(async (tabName: string, options?: { password?: string; oauth?: boolean }) => {
     const formKeys = formKeysForTab(tabName)
     if (!formKeys.length) return {}
     const data = await fetchJson<{ states: Record<string, ScoringFormState>; errors?: Record<string, string> }>('/api/forms/states', {
       method: 'POST',
-      body: JSON.stringify({ password, formKeys }),
+      body: JSON.stringify({ password: options?.password ?? '', oauth: options?.oauth === true, formKeys }),
     })
     const nextStates = data.states ?? {}
     setStatesByFormKey(prev => ({ ...prev, ...nextStates }))
@@ -424,7 +424,19 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     setStateLoadError('')
     try {
       if (adminSession && selectedForm) {
-        const loadedStates = await loadAdminStatesForTab(adminSession?.password ?? '', selectedForm.tab)
+        const loadedStates = await loadStatesForTab(selectedForm.tab, { password: adminSession?.password ?? '' })
+        const selectedState = loadedStates[nextFormKey]
+        if (selectedState) {
+          applyFormState(selectedState)
+        } else {
+          setState(null)
+          setDraft([])
+          setParticipantsByRound([])
+        }
+        return
+      }
+      if (oauthProfile && selectedForm) {
+        const loadedStates = await loadStatesForTab(selectedForm.tab, { oauth: true })
         const selectedState = loadedStates[nextFormKey]
         if (selectedState) {
           applyFormState(selectedState)
@@ -450,7 +462,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     } finally {
       setLoadingState(false)
     }
-  }, [adminSession, applyFormState, formKey, forms, loadAdminStatesForTab, statesByFormKey])
+  }, [adminSession, applyFormState, formKey, forms, loadStatesForTab, oauthProfile, statesByFormKey])
 
   useEffect(() => {
     refreshConfig()
@@ -556,7 +568,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
         body: JSON.stringify({ admin: true, password: adminInput }),
       })
       if (!data.ok) throw new Error(data.message || 'Wrong admin password')
-      const statesData = await loadAdminStatesForTab(adminInput, adminTab)
+      const statesData = await loadStatesForTab(adminTab, { password: adminInput })
       adminPreloadedTabs.current.add(`${adminInput}:${adminTab}`)
       const selectedState = formKey ? statesData?.[formKey] : null
       if (selectedState) applyFormState(selectedState)
@@ -751,11 +763,22 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     const key = `${adminSession.password}:${tab}`
     if (adminPreloadedTabs.current.has(key)) return
     adminPreloadedTabs.current.add(key)
-    loadAdminStatesForTab(adminSession.password, tab).catch(error => {
+    loadStatesForTab(tab, { password: adminSession.password }).catch(error => {
       adminPreloadedTabs.current.delete(key)
       notify('err', error instanceof Error ? error.message : String(error))
     })
-  }, [adminSession, forms.length, loadAdminStatesForTab, tab])
+  }, [adminSession, forms.length, loadStatesForTab, tab])
+
+  useEffect(() => {
+    if (!oauthProfile || !forms.length) return
+    const key = `oauth:${oauthProfile.email || oauthProfile.nickname}:${tab}`
+    if (adminPreloadedTabs.current.has(key)) return
+    adminPreloadedTabs.current.add(key)
+    loadStatesForTab(tab, { oauth: true }).catch(error => {
+      adminPreloadedTabs.current.delete(key)
+      notify('err', error instanceof Error ? error.message : String(error))
+    })
+  }, [forms.length, loadStatesForTab, oauthProfile, tab])
 
   const allowAllEditAgain = async () => {
     if (!currentState || (!adminSession && !oauthIsAdmin)) return
@@ -773,6 +796,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
           password: adminSession?.password ?? '',
           oauth: useOAuthControl,
           allRounds: true,
+          roundCount: currentState.rounds.length,
           confirmed: false,
           locked: false,
           clearDeadline: true,

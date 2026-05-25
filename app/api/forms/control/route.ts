@@ -24,11 +24,22 @@ export async function POST(req: Request) {
       if (!session?.user || !isAllowedDocChulaEmail(email)) {
         return NextResponse.json({ ok: false, message: 'Unauthorized' }, { status: 401 })
       }
+      if (payload.allRounds === true) {
+        const data = await runLegacyCompatibleBulkControl(payload, true, email)
+        await publishControlChange(payload, data)
+        return NextResponse.json({ ok: true, message: data.message || 'Updated', data })
+      }
       const data = await callOAuthGas({
         ...payload,
         email,
         action: 'setFormRoundControlOAuth',
       })
+      await publishControlChange(payload, data)
+      return NextResponse.json({ ok: true, message: data.message || 'Updated', data })
+    }
+
+    if (payload.allRounds === true) {
+      const data = await runLegacyCompatibleBulkControl(payload, false)
       await publishControlChange(payload, data)
       return NextResponse.json({ ok: true, message: data.message || 'Updated', data })
     }
@@ -42,6 +53,48 @@ export async function POST(req: Request) {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     return NextResponse.json({ ok: false, message }, { status: /busy|lock|timeout/i.test(message) ? 503 : 400 })
+  }
+}
+
+async function runLegacyCompatibleBulkControl(payload: Record<string, unknown>, oauth: boolean, email = '') {
+  const formKey = String(payload.formKey || '')
+  const roundCount = Math.max(1, Math.min(24, Math.floor(Number(payload.roundCount) || 0)))
+  if (!formKey || !roundCount) throw new Error('Invalid round')
+
+  const controlPayload = {
+    formKey,
+    password: payload.password ?? '',
+    confirmed: payload.confirmed,
+    locked: payload.locked,
+    clearDeadline: payload.clearDeadline,
+    deadlineMinutes: payload.deadlineMinutes,
+  }
+
+  for (let roundIndex = 0; roundIndex < roundCount; roundIndex++) {
+    if (oauth) {
+      await callOAuthGas({
+        ...controlPayload,
+        email,
+        roundIndex,
+        action: 'setFormRoundControlOAuth',
+      })
+    } else {
+      await callGas({
+        ...controlPayload,
+        roundIndex,
+        action: 'setFormRoundControl',
+      })
+    }
+  }
+
+  const stateData = await callGas<{ status: string; state: ScoringFormState }>({
+    action: 'readFormState',
+    formKey,
+  })
+  return {
+    status: 'ok',
+    message: 'All form rounds are editable again',
+    state: stateData.state,
   }
 }
 
@@ -59,9 +112,10 @@ async function publishControlChange(payload: Record<string, unknown>, data: Reco
     if (!patch) return
 
     if (payload.allRounds === true) {
+      const roundCount = Math.max(1, Math.min(24, Math.floor(Number(payload.roundCount) || 0)))
       await publishFormRoundPatch(
         formKey,
-        Array.from({ length: 12 }, (_, index) => ({ index, ...patch })),
+        Array.from({ length: roundCount }, (_, index) => ({ index, ...patch })),
       )
       return
     }
