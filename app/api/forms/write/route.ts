@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { auth, isAllowedDocChulaEmail } from '@/auth'
+import { publishFormRoundPatch } from '@/lib/formLive'
 import { callGas } from '@/lib/gas'
 import { callOAuthGas } from '@/lib/oauthGas'
 
@@ -34,6 +35,7 @@ export async function POST(req: Request) {
         email,
         action: 'writeFormScoreOAuth',
       })
+      await publishConfirmedRound(payload)
       return NextResponse.json({ ok: true, message: data.message || 'Saved', data })
     }
 
@@ -41,9 +43,21 @@ export async function POST(req: Request) {
       ...payload,
       action: 'writeFormScore',
     })
+    await publishConfirmedRound(payload)
     return NextResponse.json({ ok: true, message: data.message || 'Saved', data })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     return jsonError(message, statusForGasError(message))
+  }
+}
+
+async function publishConfirmedRound(payload: Record<string, unknown>) {
+  try {
+    const formKey = String(payload.formKey || '')
+    const roundIndex = Number(payload.roundIndex)
+    if (!formKey || !Number.isInteger(roundIndex) || roundIndex < 0) return
+    await publishFormRoundPatch(formKey, [{ index: roundIndex, confirmed: true, locked: false, deadlineAt: '' }])
+  } catch (error) {
+    console.error('Form live publish after write failed:', error)
   }
 }

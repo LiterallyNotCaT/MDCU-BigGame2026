@@ -9,7 +9,7 @@ const STATE_SHEET = 'GAME_STATE'
 const CHAT_GID = 398958693
 const REPORT_CHAT_GID = 1090774629
 const PASSWORD_GID = 1524637408
-const FORM_CONFIG_RANGE = 'E3:H33'
+const FORM_CONFIG_RANGE = 'E3:H40'
 const FORM_CONFIG_PUBLIC_CACHE_SECONDS = 60
 const FORM_CONFIG_PRIVATE_CACHE_SECONDS = 20
 const FORM_STATE_CACHE_SECONDS = 8
@@ -453,11 +453,11 @@ function handleAuthAccess(payload) {
 }
 
 function formConfigCacheKey_(includePasswords) {
-  return `FORM_CONFIG_V8_${includePasswords ? 'private' : 'public'}`
+  return `FORM_CONFIG_V11_${includePasswords ? 'private' : 'public'}`
 }
 
 function formAdminPasswordCacheKey_() {
-  return 'FORM_ADMIN_PASSWORD_V2'
+  return 'FORM_ADMIN_PASSWORD_V3'
 }
 
 function formStateCacheKey_(form) {
@@ -483,10 +483,10 @@ function inferFormMeta_(tab, user) {
     return { kind: 'match-single', defaultFillToRank: 1, allowTies: false, blank: false, rankCount: 2, maxRounds: 6, usesAutoRemainder: false, autoAfterHouseCount: 0 }
   }
   if (normalized.indexOf('escape') >= 0 && String(tab) === 'เช้าบน') {
-    return { kind: 'ranking-single', defaultFillToRank: 6, allowTies: false, blank: false, rankCount: 6, maxRounds: 7, usesAutoRemainder: false, autoAfterHouseCount: 0 }
+    return { kind: 'ranking-single', defaultFillToRank: 6, allowTies: false, blank: false, rankCount: 6, maxRounds: 2, usesAutoRemainder: false, autoAfterHouseCount: 0 }
   }
   if (normalized.indexOf('stacking block') >= 0 || normalized.indexOf('escape') >= 0) {
-    return { kind: 'ranking-single', defaultFillToRank: 4, allowTies: false, blank: false, rankCount: 4, maxRounds: 6, usesAutoRemainder: false, autoAfterHouseCount: 0 }
+    return { kind: 'ranking-single', defaultFillToRank: 4, allowTies: false, blank: false, rankCount: 4, maxRounds: normalized.indexOf('escape') >= 0 ? 2 : 6, usesAutoRemainder: false, autoAfterHouseCount: 0 }
   }
   return { kind: 'ranking-group', defaultFillToRank: 3, allowTies: true, blank: false, rankCount: 4, maxRounds: String(tab) === 'เช้าบน' ? 4 : 0, usesAutoRemainder: true, autoAfterHouseCount: 3 }
 }
@@ -517,6 +517,7 @@ function readFormConfigs_(includePasswords) {
 
     const spreadsheetId = FORM_SPREADSHEETS_BY_TAB[currentTab] || ''
     if (!spreadsheetId) return
+    if (user.toLowerCase().replace(/\s+/g, ' ').trim() === 'event') return
     const meta = inferFormMeta_(currentTab, user)
     const form = {
       formKey: makeFormKey_(currentTab, user, gid || '0'),
@@ -555,7 +556,12 @@ function getAdminPassword_() {
 
   const sheet = getPasswordSheet_()
   if (!sheet) return ''
-  const formAdminPassword = String(sheet.getRange('G33').getDisplayValue() || '').trim()
+  const formRows = sheet.getRange('E3:G40').getDisplayValues()
+  const adminRow = formRows.find(row => (
+    String(row[0] || '').toLowerCase().indexOf('secret') >= 0
+    || String(row[1] || '').toLowerCase().indexOf('admin') >= 0
+  ))
+  const formAdminPassword = String(adminRow && adminRow[2] || sheet.getRange('G34').getDisplayValue() || sheet.getRange('G33').getDisplayValue() || '').trim()
   if (formAdminPassword) {
     cachePutJson_(formAdminPasswordCacheKey_(), { password: formAdminPassword }, FORM_CONFIG_PRIVATE_CACHE_SECONDS)
     return formAdminPassword
@@ -911,25 +917,40 @@ function handleSetFormRoundControl(payload) {
   const password = String(payload.password || '')
   if (!password || password !== getAdminPassword_()) return { status: 'error', message: 'Wrong admin password' }
   const roundIndex = Number(payload.roundIndex)
-  if (!Number.isInteger(roundIndex) || roundIndex < 0) return { status: 'error', message: 'Invalid round' }
+  const allRounds = payload.allRounds === true
+  if (!allRounds && (!Number.isInteger(roundIndex) || roundIndex < 0)) return { status: 'error', message: 'Invalid round' }
 
   let lock = null
   try {
     lock = acquireNamedLock_('FORM_WRITE_LOCK', 20000)
     const control = readFormControl_(form.formKey)
     control.rounds = control.rounds || {}
-    const round = control.rounds[String(roundIndex)] || {}
-    if (payload.locked !== undefined) round.locked = payload.locked === true
-    if (payload.confirmed !== undefined) round.confirmed = payload.confirmed === true
-    if (payload.deadlineMinutes !== undefined) {
-      const minutes = Math.max(1, Math.min(240, Number(payload.deadlineMinutes) || 10))
-      round.deadlineAt = new Date(Date.now() + minutes * 60000).toISOString()
+    const applyPatch = function(round) {
+      if (payload.locked !== undefined) round.locked = payload.locked === true
+      if (payload.confirmed !== undefined) round.confirmed = payload.confirmed === true
+      if (payload.deadlineMinutes !== undefined) {
+        const minutes = Math.max(1, Math.min(240, Number(payload.deadlineMinutes) || 10))
+        round.deadlineAt = new Date(Date.now() + minutes * 60000).toISOString()
+      }
+      if (payload.clearDeadline === true) round.deadlineAt = ''
+      return round
     }
-    if (payload.clearDeadline === true) round.deadlineAt = ''
-    control.rounds[String(roundIndex)] = round
+    if (allRounds) {
+      const state = readFormStateFromSheet_(form, openFormSheet_(form))
+      const count = Math.max(state.rounds.length || 0, Number(form.maxRounds) || 0, 1)
+      for (let index = 0; index < count; index++) {
+        control.rounds[String(index)] = applyPatch(control.rounds[String(index)] || {})
+      }
+    } else {
+      control.rounds[String(roundIndex)] = applyPatch(control.rounds[String(roundIndex)] || {})
+    }
     writeFormControl_(form.formKey, control)
     invalidateFormState_(form)
-    return { status: 'ok', message: 'Form control updated' }
+    return {
+      status: 'ok',
+      message: allRounds ? 'All form rounds are editable again' : 'Form control updated',
+      state: readFormState_(form, true),
+    }
   } catch (err) {
     return { status: 'error', message: 'Form control is busy. Please retry.' }
   } finally {

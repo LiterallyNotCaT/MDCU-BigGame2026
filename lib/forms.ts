@@ -1,4 +1,4 @@
-export const FORM_CONFIG_RANGE = 'E3:H33'
+export const FORM_CONFIG_RANGE = 'E3:H40'
 
 export const FORM_SPREADSHEET_BY_TAB: Record<string, string> = {
   'เช้าบน': '10Z4J30FlnX_iXgGsJfc-v-USho2mSDtKT_9uFLcDEnk',
@@ -75,10 +75,10 @@ export function inferFormKind(
     return { kind: 'match-single', defaultFillToRank: 1, allowTies: false, blank: false, rankCount: 2, maxRounds: 6, usesAutoRemainder: false, autoAfterHouseCount: 0 }
   }
   if (normalized.includes('escape') && tab === 'เช้าบน') {
-    return { kind: 'ranking-single', defaultFillToRank: 6, allowTies: false, blank: false, rankCount: 6, maxRounds: 7, usesAutoRemainder: false, autoAfterHouseCount: 0 }
+    return { kind: 'ranking-single', defaultFillToRank: 6, allowTies: false, blank: false, rankCount: 6, maxRounds: 2, usesAutoRemainder: false, autoAfterHouseCount: 0 }
   }
   if (normalized.includes('stacking block') || normalized.includes('escape')) {
-    return { kind: 'ranking-single', defaultFillToRank: 4, allowTies: false, blank: false, rankCount: 4, maxRounds: 6, usesAutoRemainder: false, autoAfterHouseCount: 0 }
+    return { kind: 'ranking-single', defaultFillToRank: 4, allowTies: false, blank: false, rankCount: 4, maxRounds: normalized.includes('escape') ? 2 : 6, usesAutoRemainder: false, autoAfterHouseCount: 0 }
   }
   return { kind: 'ranking-group', defaultFillToRank: 3, allowTies: true, blank: false, rankCount: 4, maxRounds: tab === 'เช้าบน' ? 4 : 0, usesAutoRemainder: true, autoAfterHouseCount: 3 }
 }

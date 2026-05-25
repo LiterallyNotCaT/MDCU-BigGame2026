@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { callGas } from '@/lib/gas'
+import { publishFormState } from '@/lib/formLive'
 import type { ScoringFormAuth } from '@/lib/forms'
 
 export const runtime = 'nodejs'
@@ -20,6 +21,7 @@ export async function POST(req: Request) {
       password: payload.password ?? '',
       admin: payload.admin === true,
     })
+    if (data.state) await publishFormState(data.state).catch(error => console.error('Form live publish after auth failed:', error))
     return NextResponse.json(data)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

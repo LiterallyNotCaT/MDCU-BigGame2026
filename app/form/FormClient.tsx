@@ -32,6 +32,16 @@ type Session = {
   authMode?: 'password' | 'oauth'
 }
 
+type FormLiveState = {
+  formKey: string
+  version: number
+  rounds: Record<string, {
+    confirmed: boolean
+    locked: boolean
+    deadlineAt: string
+  }>
+}
+
 const FORM_TABS = ['เช้าล่าง', 'เช้าบน', 'Games บ่าย']
 const FORM_SESSION_STORAGE_KEY = 'biggame_form_sessions_v1'
 
@@ -114,6 +124,21 @@ function normalizeScoreText(value: string, allowNegative: boolean) {
   if (!pattern.test(compact)) return ''
   const number = Number(compact)
   return Number.isSafeInteger(number) ? String(number) : ''
+}
+
+function roundDisplayMeta(state: ScoringFormState, round: { label: string; wave: string }, index: number) {
+  if (state.form.kind === 'score-unsigned') {
+    const labels = ['2-ซองทอง', '2-ซองขาว', '4-ซองทอง', '4-ซองขาว']
+    const waves = ['2', '2', '4', '4']
+    return {
+      label: labels[index] ?? round.label,
+      wave: waves[index] ?? round.wave,
+    }
+  }
+  return {
+    label: round.label || `Round ${index + 1}`,
+    wave: round.wave || '-',
+  }
 }
 
 function validatedColumn(
@@ -220,6 +245,8 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
   const [oauthLoading, setOauthLoading] = useState(true)
   const [oauthError, setOauthError] = useState('')
   const didRouteOauthProfile = useRef(false)
+  const adminPreloadedTabs = useRef<Set<string>>(new Set())
+  const liveVersionByForm = useRef<Record<string, number>>({})
   const grouped = useMemo(() => groupByTab(forms), [forms])
   const currentForms = grouped[tab] ?? []
   const currentForm = forms.find(form => form.formKey === formKey) ?? currentForms[0] ?? null
@@ -260,6 +287,39 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     setNotice({ type, text })
     window.setTimeout(() => setNotice(null), 4200)
   }
+
+  const applyLiveState = useCallback((live: FormLiveState) => {
+    if (!live?.formKey || !live.version || !live.rounds) return
+    liveVersionByForm.current[live.formKey] = Math.max(liveVersionByForm.current[live.formKey] ?? 0, live.version)
+    const mergeRounds = (rounds: ScoringFormState['rounds']) => rounds.map((round, index) => {
+      const liveRound = live.rounds[String(index)]
+      if (!liveRound) return round
+      if (
+        round.confirmed === liveRound.confirmed
+        && round.locked === liveRound.locked
+        && (round.deadlineAt || '') === (liveRound.deadlineAt || '')
+      ) return round
+      return {
+        ...round,
+        confirmed: liveRound.confirmed === true,
+        locked: liveRound.locked === true,
+        deadlineAt: liveRound.deadlineAt || '',
+      }
+    })
+
+    setState(prev => {
+      if (!prev || prev.form.formKey !== live.formKey) return prev
+      return { ...prev, rounds: mergeRounds(prev.rounds) }
+    })
+    setStatesByFormKey(prev => {
+      const cached = prev[live.formKey]
+      if (!cached) return prev
+      return {
+        ...prev,
+        [live.formKey]: { ...cached, rounds: mergeRounds(cached.rounds) },
+      }
+    })
+  }, [])
 
   const refreshConfig = useCallback(async () => {
     setLoadingConfig(true)
@@ -424,6 +484,43 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     setSelectedRound(0)
   }, [canLoadSelectedForm, currentState?.form.formKey, formKey, refreshState])
 
+  useEffect(() => {
+    const liveFormKey = currentForm && session && !isAdmin && canEditCurrentForm ? currentForm.formKey : ''
+    if (!liveFormKey) return
+    let stopped = false
+    let timer: number | undefined
+
+    const schedule = () => {
+      if (!stopped) timer = window.setTimeout(sync, 1400)
+    }
+
+    const sync = async () => {
+      if (stopped) return
+      if (document.hidden) {
+        schedule()
+        return
+      }
+      try {
+        const res = await fetch(`/api/forms/live?formKey=${encodeURIComponent(liveFormKey)}&t=${Date.now()}`, { cache: 'no-store' })
+        const data = await res.json().catch(() => null) as { ok?: boolean; live?: FormLiveState } | null
+        const live = data?.live
+        if (data?.ok && live && live.version > (liveVersionByForm.current[liveFormKey] ?? 0)) {
+          applyLiveState(live)
+        }
+      } catch {
+        // Live sync is only a fast UI signal; the sheet write remains authoritative.
+      } finally {
+        schedule()
+      }
+    }
+
+    sync()
+    return () => {
+      stopped = true
+      if (timer) window.clearTimeout(timer)
+    }
+  }, [applyLiveState, canEditCurrentForm, currentForm, isAdmin, session])
+
   const loginStaff = async () => {
     if (!currentForm || !passwordInput.trim()) return
     try {
@@ -453,12 +550,14 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
   const loginAdmin = async () => {
     if (!adminInput.trim()) return
     try {
+      const adminTab = currentForm?.tab ?? tab
       const data = await fetchJson<ScoringFormAuth>('/api/forms/auth', {
         method: 'POST',
         body: JSON.stringify({ admin: true, password: adminInput }),
       })
       if (!data.ok) throw new Error(data.message || 'Wrong admin password')
-      const statesData = await loadAdminStatesForTab(adminInput, currentForm?.tab ?? tab)
+      const statesData = await loadAdminStatesForTab(adminInput, adminTab)
+      adminPreloadedTabs.current.add(`${adminInput}:${adminTab}`)
       const selectedState = formKey ? statesData?.[formKey] : null
       if (selectedState) applyFormState(selectedState)
       setAdminSession({ role: 'admin', username: 'Admin', password: adminInput, authMode: 'password' })
@@ -478,6 +577,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     }
     setSessions({})
     setAdminSession(null)
+    adminPreloadedTabs.current.clear()
     setState(null)
     setStatesByFormKey({})
     setDraft([])
@@ -577,16 +677,27 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     if (!currentState || (!adminSession && !oauthIsAdmin)) return
     setControlBusy(true)
     try {
-      await fetchJson('/api/forms/control', {
+      const useOAuthControl = oauthIsAdmin && !adminSession
+      const response = await fetchJson<{
+        data?: { state?: ScoringFormState }
+        state?: ScoringFormState
+      }>('/api/forms/control', {
         method: 'POST',
         body: JSON.stringify({
           formKey: currentState.form.formKey,
           password: adminSession?.password ?? '',
-          oauth: oauthIsAdmin,
+          oauth: useOAuthControl,
           roundIndex,
           ...patch,
         }),
       })
+      const returnedState = response.data?.state ?? response.state
+      if (returnedState) {
+        applyFormState(returnedState)
+        setStatesByFormKey(prev => ({ ...prev, [returnedState.form.formKey]: returnedState }))
+        notify('ok', 'Round control updated')
+        return
+      }
       setState(prev => {
         if (!prev || prev.form.formKey !== currentState.form.formKey) return prev
         return {
@@ -628,6 +739,70 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
         }
       })
       notify('ok', 'Round control updated')
+    } catch (error) {
+      notify('err', error instanceof Error ? error.message : String(error))
+    } finally {
+      setControlBusy(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!adminSession || !forms.length) return
+    const key = `${adminSession.password}:${tab}`
+    if (adminPreloadedTabs.current.has(key)) return
+    adminPreloadedTabs.current.add(key)
+    loadAdminStatesForTab(adminSession.password, tab).catch(error => {
+      adminPreloadedTabs.current.delete(key)
+      notify('err', error instanceof Error ? error.message : String(error))
+    })
+  }, [adminSession, forms.length, loadAdminStatesForTab, tab])
+
+  const allowAllEditAgain = async () => {
+    if (!currentState || (!adminSession && !oauthIsAdmin)) return
+    if (!window.confirm('Allow every round in this table to be edited and submitted again?')) return
+    setControlBusy(true)
+    try {
+      const useOAuthControl = oauthIsAdmin && !adminSession
+      const response = await fetchJson<{
+        data?: { state?: ScoringFormState }
+        state?: ScoringFormState
+      }>('/api/forms/control', {
+        method: 'POST',
+        body: JSON.stringify({
+          formKey: currentState.form.formKey,
+          password: adminSession?.password ?? '',
+          oauth: useOAuthControl,
+          allRounds: true,
+          confirmed: false,
+          locked: false,
+          clearDeadline: true,
+        }),
+      })
+      const returnedState = response.data?.state ?? response.state
+      if (returnedState) {
+        applyFormState(returnedState)
+        setStatesByFormKey(prev => ({ ...prev, [returnedState.form.formKey]: returnedState }))
+      } else {
+        setState(prev => {
+          if (!prev || prev.form.formKey !== currentState.form.formKey) return prev
+          return {
+            ...prev,
+            rounds: prev.rounds.map(round => ({ ...round, confirmed: false, locked: false, deadlineAt: '' })),
+          }
+        })
+        setStatesByFormKey(prev => {
+          const cached = prev[currentState.form.formKey]
+          if (!cached) return prev
+          return {
+            ...prev,
+            [currentState.form.formKey]: {
+              ...cached,
+              rounds: cached.rounds.map(round => ({ ...round, confirmed: false, locked: false, deadlineAt: '' })),
+            },
+          }
+        })
+      }
+      notify('ok', 'All rounds can be edited again')
     } catch (error) {
       notify('err', error instanceof Error ? error.message : String(error))
     } finally {
@@ -796,17 +971,20 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
                 </div>
 
                 <div className="form-round-toolbar">
-                  {visibleRounds.map((round, index) => (
-                    <button
-                      key={round.index}
-                      type="button"
-                      onClick={() => setSelectedRound(index)}
-                      className={clsx('form-round-chip', selectedRound === index && 'active', round.confirmed && 'confirmed', round.locked && 'locked')}
-                    >
-                      <span>{round.label || `Round ${index + 1}`}</span>
-                      {round.confirmed ? <CheckCircle2 size={13} /> : round.locked ? <Lock size={13} /> : <Clock size={13} />}
-                    </button>
-                  ))}
+                  {visibleRounds.map((round, index) => {
+                    const meta = roundDisplayMeta(currentState, round, index)
+                    return (
+                      <button
+                        key={round.index}
+                        type="button"
+                        onClick={() => setSelectedRound(index)}
+                        className={clsx('form-round-chip', selectedRound === index && 'active', round.confirmed && 'confirmed', round.locked && 'locked')}
+                      >
+                        <span>{meta.label}</span>
+                        {round.confirmed ? <CheckCircle2 size={13} /> : round.locked ? <Lock size={13} /> : <Clock size={13} />}
+                      </button>
+                    )
+                  })}
                 </div>
 
                 <div className={clsx('form-settings-row', !showAutoControls && 'manual-only')}>
@@ -843,6 +1021,9 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
                       <button type="button" disabled={controlBusy} onClick={() => setRoundControl(selectedRound, { confirmed: false, locked: false })} className="btn btn-ghost">
                         Edit again
                       </button>
+                      <button type="button" disabled={controlBusy} onClick={allowAllEditAgain} className="btn btn-ghost">
+                        Allow all edit again
+                      </button>
                     </div>
                   )}
                 </div>
@@ -852,12 +1033,15 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
                     <thead>
                       <tr>
                         <th>{isScoreInputForm ? 'บ้าน' : 'Rank'}</th>
-                        {visibleRounds.map((round, roundIndex) => (
-                          <th key={round.index} className={clsx(selectedRound === roundIndex && 'active-round')}>
-                            <div>{round.label || `Round ${round.index}`}</div>
-                            <small>Wave {round.wave || '-'}</small>
-                          </th>
-                        ))}
+                        {visibleRounds.map((round, roundIndex) => {
+                          const meta = roundDisplayMeta(currentState, round, roundIndex)
+                          return (
+                            <th key={round.index} className={clsx(selectedRound === roundIndex && 'active-round')}>
+                              <div>{meta.label}</div>
+                              <small>Wave {meta.wave}</small>
+                            </th>
+                          )
+                        })}
                       </tr>
                     </thead>
                     <tbody>
