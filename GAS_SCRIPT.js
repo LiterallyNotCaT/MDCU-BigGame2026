@@ -886,14 +886,29 @@ function writeFormScoreForUser_(form, payload, username) {
   try {
     lock = acquireNamedLock_('FORM_WRITE_LOCK', 45000)
 
-    const state = readFormStateFromSheet_(form, sheet)
-    if (roundIndex >= state.rounds.length) return { status: 'error', message: 'Round not found' }
-    const round = state.rounds[roundIndex]
+    const maxRounds = Number(form.maxRounds) || Math.max(1, sheet.getLastColumn() - formValueStartColumn_(form) + 1)
+    if (roundIndex >= maxRounds) return { status: 'error', message: 'Round not found' }
     const now = new Date()
 
     const control = readFormControl_(form.formKey)
+    const existingRoundControl = control.rounds && control.rounds[String(roundIndex)] || {}
+    if (payload.admin !== true) {
+      if (existingRoundControl.confirmed === true) {
+        return { status: 'error', message: "Can't send the data as there is already confirmation from another person." }
+      }
+      if (existingRoundControl.locked === true) {
+        return { status: 'error', message: 'This round is locked' }
+      }
+      if (existingRoundControl.deadlineAt) {
+        const deadlineMs = new Date(existingRoundControl.deadlineAt).getTime()
+        if (isFinite(deadlineMs) && Date.now() > deadlineMs) {
+          return { status: 'error', message: 'This round is timed out' }
+        }
+      }
+    }
+
     const fillToRank = clampFormFill_(payload.fillToRank, form.defaultFillToRank)
-    const participantsText = defaultParticipants_(payload.participants || round.participants)
+    const participantsText = defaultParticipants_(payload.participants)
     const values = buildFormColumnValues_(form, payload.values || [], fillToRank, participantsText)
     const col = formValueStartColumn_(form) + roundIndex
 
@@ -915,9 +930,8 @@ function writeFormScoreForUser_(form, payload, username) {
       confirmedAt: now.toISOString(),
     }
     writeFormControl_(form.formKey, control)
-    SpreadsheetApp.flush()
     invalidateFormState_(form)
-    return { status: 'ok', message: `${form.user} ${round.label} saved`, roundIndex }
+    return { status: 'ok', message: `${form.user} Round ${roundIndex + 1} saved`, roundIndex }
   } catch (err) {
     const message = String(err && err.message ? err.message : err)
     return {

@@ -591,7 +591,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     let timer: number | undefined
 
     const schedule = () => {
-      if (!stopped) timer = window.setTimeout(sync, 1400)
+      if (!stopped) timer = window.setTimeout(sync, 900)
     }
 
     const sync = async () => {

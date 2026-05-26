@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { callGas } from '@/lib/gas'
+import { cacheFormAdminPassword } from '@/lib/formAdminAuthCache'
 import { mergeFormLiveIntoState } from '@/lib/formLive'
 import type { ScoringFormAuth } from '@/lib/forms'
 
@@ -21,6 +22,9 @@ export async function POST(req: Request) {
       password: payload.password ?? '',
       admin: payload.admin === true,
     })
+    if (payload.admin === true && data.ok) {
+      await cacheFormAdminPassword(payload.password ?? '')
+    }
     const state = data.state ? await mergeFormLiveIntoState(data.state) : data.state
     return NextResponse.json({ ...data, state })
   } catch (error) {

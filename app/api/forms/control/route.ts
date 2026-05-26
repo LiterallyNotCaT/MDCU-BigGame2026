@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { auth, isAllowedDocChulaEmail } from '@/auth'
+import { cacheFormAdminPassword, readCachedFormAdminPassword } from '@/lib/formAdminAuthCache'
 import { publishFormRoundPatch } from '@/lib/formLive'
 import { isOAuthAdmin } from '@/lib/formPermissions'
 import { callGas } from '@/lib/gas'
@@ -74,11 +75,15 @@ async function assertAdmin(payload: Record<string, unknown>) {
     return
   }
 
+  const password = String(payload.password ?? '')
+  if (await readCachedFormAdminPassword(password)) return
+
   await callGas({
     action: 'authFormUser',
     admin: true,
-    password: String(payload.password ?? ''),
+    password,
   })
+  await cacheFormAdminPassword(password)
 }
 
 function controlTargetsFromPayload(payload: Record<string, unknown>) {

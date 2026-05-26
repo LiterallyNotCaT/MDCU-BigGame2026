@@ -45,6 +45,12 @@ export async function POST(req: Request) {
     }
 
     try {
+      await publishFormRoundPatch(formKey, [{
+        index: roundIndex,
+        locked: true,
+        participants: String(payload.participants ?? ''),
+      }])
+
       if (payload.oauth === true) {
         const session = await auth()
         const email = session?.user?.email ?? ''
@@ -69,6 +75,12 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, message: data.message || 'Saved', data })
     } catch (error) {
       await releaseFormRoundSubmitClaim(formKey, roundIndex)
+      await publishFormRoundPatch(formKey, [{
+        index: roundIndex,
+        locked: false,
+      }]).catch(err => {
+        console.error('Form live unlock after failed write failed:', err)
+      })
       throw error
     }
   } catch (error) {
