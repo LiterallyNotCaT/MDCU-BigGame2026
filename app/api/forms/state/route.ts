@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { publishFormState } from '@/lib/formLive'
+import { mergeFormLiveIntoState } from '@/lib/formLive'
 import { callGas } from '@/lib/gas'
 import type { ScoringFormState } from '@/lib/forms'
 
@@ -19,8 +19,8 @@ export async function POST(req: Request) {
       action: 'readFormState',
       formKey: payload.formKey ?? '',
     })
-    await publishFormState(data.state).catch(error => console.error('Form live publish after state read failed:', error))
-    return NextResponse.json({ ok: true, state: data.state })
+    const state = await mergeFormLiveIntoState(data.state)
+    return NextResponse.json({ ok: true, state })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     return NextResponse.json({ ok: false, message }, { status: 500 })

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { auth, isAllowedDocChulaEmail } from '@/auth'
-import { publishFormRoundPatch, publishFormState } from '@/lib/formLive'
+import { mergeFormLiveIntoState, publishFormRoundPatch, publishFullFormState } from '@/lib/formLive'
 import { callGas } from '@/lib/gas'
 import { callOAuthGas } from '@/lib/oauthGas'
 import type { ScoringFormState } from '@/lib/forms'
@@ -25,7 +25,7 @@ export async function POST(req: Request) {
         return NextResponse.json({ ok: false, message: 'Unauthorized' }, { status: 401 })
       }
       if (payload.allRounds === true) {
-        const data = await runLegacyCompatibleBulkControl(payload, true, email)
+      const data = await runLegacyCompatibleBulkControl(payload, true, email)
         await publishControlChange(payload, data)
         return NextResponse.json({ ok: true, message: data.message || 'Updated', data })
       }
@@ -87,42 +87,82 @@ async function runLegacyCompatibleBulkControl(payload: Record<string, unknown>, 
     }
   }
 
+  const state = await readStateAfterControl(formKey, oauth, email)
+  return {
+    status: 'ok',
+    message: 'All form rounds are editable again',
+    state: applyControlPayloadToState(state, payload),
+  }
+}
+
+function applyControlPayloadToState(state: ScoringFormState | null | undefined, payload: Record<string, unknown>) {
+  if (!state) return state
+  const patch = controlPatchFromPayload(payload)
+  if (!patch) return state
+  const applyPatch = (round: ScoringFormState['rounds'][number]) => ({
+    ...round,
+    confirmed: patch.confirmed === undefined ? round.confirmed : patch.confirmed,
+    locked: patch.locked === undefined ? round.locked : patch.locked,
+    deadlineAt: patch.deadlineAt === undefined ? round.deadlineAt : patch.deadlineAt,
+  })
+  if (payload.allRounds === true) {
+    return { ...state, rounds: state.rounds.map(applyPatch) }
+  }
+  const roundIndex = Number(payload.roundIndex)
+  if (!Number.isInteger(roundIndex) || roundIndex < 0) return state
+  return {
+    ...state,
+    rounds: state.rounds.map((round, index) => index === roundIndex ? applyPatch(round) : round),
+  }
+}
+
+async function readStateAfterControl(formKey: string, oauth: boolean, email = '') {
+  if (oauth) {
+    try {
+      const data = await callOAuthGas<{
+        status: string
+        states: Record<string, ScoringFormState>
+      }>({
+        action: 'readFormStatesOAuth',
+        email,
+        formKeys: [formKey],
+      })
+      const state = data.states?.[formKey]
+      if (state) return await mergeFormLiveIntoState(state)
+    } catch {
+      // Fall back to the main form reader below.
+    }
+  }
+
   const stateData = await callGas<{ status: string; state: ScoringFormState }>({
     action: 'readFormState',
     formKey,
   })
-  return {
-    status: 'ok',
-    message: 'All form rounds are editable again',
-    state: stateData.state,
-  }
+  return await mergeFormLiveIntoState(stateData.state)
 }
 
 async function publishControlChange(payload: Record<string, unknown>, data: Record<string, unknown>) {
   try {
-    const returnedState = data.state as ScoringFormState | undefined
-    if (returnedState?.form?.formKey) {
-      await publishFormState(returnedState)
-      return
-    }
-
     const formKey = String(payload.formKey || '')
-    if (!formKey) return
     const patch = controlPatchFromPayload(payload)
-    if (!patch) return
+    if (formKey && patch) {
+      if (payload.allRounds === true) {
+        const roundCount = Math.max(1, Math.min(24, Math.floor(Number(payload.roundCount) || 0)))
+        await publishFormRoundPatch(
+          formKey,
+          Array.from({ length: roundCount }, (_, index) => ({ index, ...patch })),
+        )
+        return
+      }
 
-    if (payload.allRounds === true) {
-      const roundCount = Math.max(1, Math.min(24, Math.floor(Number(payload.roundCount) || 0)))
-      await publishFormRoundPatch(
-        formKey,
-        Array.from({ length: roundCount }, (_, index) => ({ index, ...patch })),
-      )
+      const roundIndex = Number(payload.roundIndex)
+      if (!Number.isInteger(roundIndex) || roundIndex < 0) return
+      await publishFormRoundPatch(formKey, [{ index: roundIndex, ...patch }])
       return
     }
 
-    const roundIndex = Number(payload.roundIndex)
-    if (!Number.isInteger(roundIndex) || roundIndex < 0) return
-    await publishFormRoundPatch(formKey, [{ index: roundIndex, ...patch }])
+    const returnedState = data.state as ScoringFormState | undefined
+    if (returnedState?.form?.formKey) await publishFullFormState(returnedState)
   } catch (error) {
     console.error('Form live publish after control failed:', error)
   }

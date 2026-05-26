@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { auth, isAllowedDocChulaEmail } from '@/auth'
 import { canOAuthViewForm, type OAuthFormProfile } from '@/lib/formPermissions'
-import { publishFormState } from '@/lib/formLive'
+import { mergeFormLiveIntoStates } from '@/lib/formLive'
 import { callGas } from '@/lib/gas'
 import { callOAuthGas } from '@/lib/oauthGas'
 import type { ScoringFormState } from '@/lib/forms'
@@ -30,22 +30,20 @@ export async function POST(req: Request) {
         email,
       })
       const requestedKeys = Array.isArray(payload.formKeys) ? payload.formKeys.filter(Boolean) : []
-      const states: Record<string, ScoringFormState> = {}
-      const errors: Record<string, string> = {}
-      for (const formKey of requestedKeys) {
-        try {
-          const data = await callGas<{ status: string; state: ScoringFormState }>({
-            action: 'readFormState',
-            formKey,
-          })
-          if (!canOAuthViewForm(profileData.profile, data.state.form)) continue
-          states[formKey] = data.state
-          await publishFormState(data.state).catch(error => console.error('Form live publish after OAuth batch read failed:', error))
-        } catch (error) {
-          errors[formKey] = error instanceof Error ? error.message : String(error)
-        }
-      }
-      return NextResponse.json({ ok: true, states, errors })
+      const data = await callOAuthGas<{
+        status: string
+        states: Record<string, ScoringFormState>
+        errors?: Record<string, string>
+      }>({
+        action: 'readFormStatesOAuth',
+        email,
+        formKeys: requestedKeys,
+      })
+      const visibleStates = Object.fromEntries(
+        Object.entries(data.states ?? {}).filter(([, state]) => canOAuthViewForm(profileData.profile, state.form)),
+      )
+      const states = await mergeFormLiveIntoStates(visibleStates)
+      return NextResponse.json({ ok: true, states, errors: data.errors ?? {} })
     }
 
     const data = await callGas<{
@@ -57,7 +55,8 @@ export async function POST(req: Request) {
       password: payload.password ?? '',
       formKeys: payload.formKeys ?? [],
     })
-    return NextResponse.json({ ok: true, states: data.states ?? {}, errors: data.errors ?? {} })
+    const states = await mergeFormLiveIntoStates(data.states ?? {})
+    return NextResponse.json({ ok: true, states, errors: data.errors ?? {} })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     return NextResponse.json({ ok: false, message, states: {} }, { status: 500 })

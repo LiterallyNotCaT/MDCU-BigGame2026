@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { auth, isAllowedDocChulaEmail } from '@/auth'
-import { publishFormRoundPatch } from '@/lib/formLive'
+import { assertFormRoundEditable, publishFormRoundPatch } from '@/lib/formLive'
 import { callGas } from '@/lib/gas'
 import { callOAuthGas } from '@/lib/oauthGas'
 
@@ -25,6 +25,11 @@ export async function POST(req: Request) {
   }
 
   try {
+    const formKey = String(payload.formKey || '')
+    const roundIndex = Number(payload.roundIndex)
+    const isAdmin = payload.admin === true
+    await assertFormRoundEditable(formKey, roundIndex, isAdmin)
+
     if (payload.oauth === true) {
       const session = await auth()
       const email = session?.user?.email ?? ''

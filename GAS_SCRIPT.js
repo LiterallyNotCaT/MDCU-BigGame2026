@@ -867,13 +867,6 @@ function handleWriteFormScore(payload) {
     if (roundIndex >= state.rounds.length) return { status: 'error', message: 'Round not found' }
     const round = state.rounds[roundIndex]
     const now = new Date()
-    if (!isAdmin) {
-      if (round.confirmed) return { status: 'error', message: 'This round is already confirmed' }
-      if (round.locked) return { status: 'error', message: 'This round is locked' }
-      if (round.deadlineAt && now.getTime() > new Date(round.deadlineAt).getTime()) {
-        return { status: 'error', message: 'This round is timed out' }
-      }
-    }
 
     const control = readFormControl_(form.formKey)
     const fillToRank = clampFormFill_(payload.fillToRank, form.defaultFillToRank)
