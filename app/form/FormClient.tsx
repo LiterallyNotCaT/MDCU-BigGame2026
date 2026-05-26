@@ -902,6 +902,23 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
   const effectiveSelectedAutoRow = usesAutoRemainder ? selectedAutoRow : -1
   const headerTitle = session ? `Staff Form for ${session.username}` : 'Staff Form'
   const profileLabel = oauthProfile?.nickname || oauthEmail
+  const adminRoundControls = (adminSession || oauthIsAdmin) && selectedRoundMeta ? (
+    <div className="form-admin-controls">
+      <button type="button" disabled={controlBusy} onClick={() => setRoundControl(selectedRound, { locked: !selectedRoundMeta.locked })} className="btn btn-ghost">
+        {selectedRoundMeta.locked ? <Unlock size={13} /> : <Lock size={13} />}
+        {selectedRoundMeta.locked ? 'Unlock' : 'Lock'}
+      </button>
+      <button type="button" disabled={controlBusy} onClick={() => setRoundControl(selectedRound, { confirmed: false, locked: false, clearDeadline: true })} className="btn btn-ghost">
+        Edit again
+      </button>
+      <button type="button" disabled={controlBusy} onClick={() => openBulkControl('edit')} className="btn btn-ghost">
+        Allow all edit again
+      </button>
+      <button type="button" disabled={controlBusy} onClick={() => openBulkControl('unlock')} className="btn btn-ghost">
+        Unlock all
+      </button>
+    </div>
+  ) : null
 
   return (
     <div className="wire-page-full form-page">
@@ -994,7 +1011,11 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
               ))}
             </div>
 
-            {!currentForm ? (
+            {loadingConfig || oauthLoading ? (
+              <div className="form-empty-state form-loading-panel">
+                <div className="form-loading">Loading forms...</div>
+              </div>
+            ) : !currentForm ? (
               <div className="form-empty-state">No form config found.</div>
             ) : oauthError ? (
               <div className="form-empty-state">
@@ -1048,35 +1069,38 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
                   </button>
                 </div>
 
-                <div className="form-round-toolbar">
-                  {visibleRounds.map((round, index) => {
-                    const meta = roundDisplayMeta(currentState, round, index)
-                    return (
-                      <button
-                        key={round.index}
-                        type="button"
-                        onClick={() => setSelectedRound(index)}
-                        className={clsx('form-round-chip', selectedRound === index && 'active', round.confirmed && 'confirmed', round.locked && 'locked')}
-                      >
-                        <span>{meta.label}</span>
-                        {round.confirmed ? <CheckCircle2 size={13} /> : round.locked ? <Lock size={13} /> : <Clock size={13} />}
-                      </button>
-                    )
-                  })}
-                </div>
+                {isAdmin && (
+                  <div className="form-round-toolbar">
+                    {visibleRounds.map((round, index) => {
+                      const meta = roundDisplayMeta(currentState, round, index)
+                      return (
+                        <button
+                          key={round.index}
+                          type="button"
+                          onClick={() => setSelectedRound(index)}
+                          className={clsx('form-round-chip', selectedRound === index && 'active', round.confirmed && 'confirmed', round.locked && 'locked')}
+                        >
+                          <span>{meta.label}</span>
+                          {round.confirmed ? <CheckCircle2 size={13} /> : round.locked ? <Lock size={13} /> : <Clock size={13} />}
+                        </button>
+                      )
+                    })}
+                    {!showAutoControls && adminRoundControls}
+                  </div>
+                )}
 
-                <div className={clsx('form-settings-row', !showAutoControls && 'manual-only')}>
-                  {showAutoControls && (
+                {showAutoControls && (
+                  <div className="form-settings-row">
                     <>
                       <label>
-                        <span>Fill through rank</span>
+                        <span>กรอกถึงอันดับที่ :</span>
                         <input
                           type="number"
                           min={1}
                           max={11}
                           value={fillToRank}
                           onChange={event => setFillToRank(clampFillToRank(Number(event.target.value)))}
-                          disabled={!selectedCanEdit}
+                          disabled={!isAdmin}
                         />
                       </label>
                       <label>
@@ -1089,25 +1113,9 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
                         />
                       </label>
                     </>
-                  )}
-                  {(adminSession || oauthIsAdmin) && selectedRoundMeta && (
-                    <div className="form-admin-controls">
-                      <button type="button" disabled={controlBusy} onClick={() => setRoundControl(selectedRound, { locked: !selectedRoundMeta.locked })} className="btn btn-ghost">
-                        {selectedRoundMeta.locked ? <Unlock size={13} /> : <Lock size={13} />}
-                        {selectedRoundMeta.locked ? 'Unlock' : 'Lock'}
-                      </button>
-                      <button type="button" disabled={controlBusy} onClick={() => setRoundControl(selectedRound, { confirmed: false, locked: false, clearDeadline: true })} className="btn btn-ghost">
-                        Edit again
-                      </button>
-                      <button type="button" disabled={controlBusy} onClick={() => openBulkControl('edit')} className="btn btn-ghost">
-                        Allow all edit again
-                      </button>
-                      <button type="button" disabled={controlBusy} onClick={() => openBulkControl('unlock')} className="btn btn-ghost">
-                        Unlock all
-                      </button>
-                    </div>
-                  )}
-                </div>
+                    {adminRoundControls}
+                  </div>
+                )}
 
                 <div className="form-table-wrap">
                   <table className="form-score-table">

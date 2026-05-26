@@ -27,6 +27,7 @@ const OAUTH_LOGIN_MAX_ROWS = 250
 const OAUTH_LOGIN_GAME_START_COL = 9
 const OAUTH_LOGIN_GAME_END_COL = 26
 const OAUTH_LOGIN_SCAN_ROWS = 20
+const OAUTH_PROFILE_CACHE_SECONDS = 45
 const WAVE_GIDS = {
   1: 1448591830,
 }
@@ -1079,6 +1080,10 @@ function normalizeOAuthEmail_(value) {
   return String(value || '').trim().toLowerCase()
 }
 
+function oauthProfileCacheKey_(email) {
+  return `OAUTH_PROFILE_V2_${cacheKeyPart_(normalizeOAuthEmail_(email))}`
+}
+
 function normalizeOAuthGameKey_(value) {
   return String(value || '')
     .trim()
@@ -1106,6 +1111,9 @@ function readOAuthProfile_(email) {
   const targetEmail = normalizeOAuthEmail_(email)
   if (!targetEmail) throw new Error('Missing OAuth email')
 
+  const cached = cacheGetJson_(oauthProfileCacheKey_(targetEmail))
+  if (cached && cached.email === targetEmail) return cached
+
   const sheet = getOAuthLoginSheet_()
   const layout = detectOAuthLoginLayout_(sheet) || {
     headerRow: 1,
@@ -1125,7 +1133,7 @@ function readOAuthProfile_(email) {
 
   const row = rows.find(item => normalizeOAuthEmail_(item[0]) === targetEmail)
   if (!row) {
-    return {
+    const profile = {
       email: targetEmail,
       nickname: '',
       name: '',
@@ -1135,6 +1143,8 @@ function readOAuthProfile_(email) {
       gameKeys: [],
       isAdmin: false,
     }
+    cachePutJson_(oauthProfileCacheKey_(targetEmail), profile, OAUTH_PROFILE_CACHE_SECONDS)
+    return profile
   }
 
   const role = normalizeOAuthRole_(row[layout.roleCol - 1])
@@ -1146,7 +1156,7 @@ function readOAuthProfile_(email) {
     gameKeys.push(normalizeOAuthGameKey_(header))
   })
 
-  return {
+  const profile = {
     email: targetEmail,
     nickname: String(row[1] || '').trim(),
     name: String(row[2] || '').trim(),
@@ -1156,6 +1166,8 @@ function readOAuthProfile_(email) {
     gameKeys,
     isAdmin: role === 'ADMIN',
   }
+  cachePutJson_(oauthProfileCacheKey_(targetEmail), profile, OAUTH_PROFILE_CACHE_SECONDS)
+  return profile
 }
 
 function oauthCanEditForm_(profile, form) {

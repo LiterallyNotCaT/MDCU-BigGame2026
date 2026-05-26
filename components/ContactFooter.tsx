@@ -14,7 +14,7 @@ function openEmail(email: string) {
 export default function ContactFooter({ className }: { className: string }) {
   return (
     <footer className={className}>
-      <span>Login problem contact:</span>
+      <span>Login problems, pls contact</span>
       {ADMIN_CONTACT_EMAILS.map(email => (
         <button key={email} type="button" onClick={() => openEmail(email)} className="contact-email-button">
           {email}
