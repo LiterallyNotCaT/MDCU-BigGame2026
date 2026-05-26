@@ -15,10 +15,13 @@ export default function ContactFooter({ className }: { className: string }) {
   return (
     <footer className={className}>
       <span>Login problems, pls contact</span>
-      {ADMIN_CONTACT_EMAILS.map(email => (
-        <button key={email} type="button" onClick={() => openEmail(email)} className="contact-email-button">
-          {email}
-        </button>
+      {ADMIN_CONTACT_EMAILS.map((email, index) => (
+        <span key={email} className="contact-email-item">
+          {index > 0 && <span className="contact-email-or">or</span>}
+          <button type="button" onClick={() => openEmail(email)} className="contact-email-button">
+            {email}
+          </button>
+        </span>
       ))}
     </footer>
   )
