@@ -987,7 +987,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
         Edit again
       </button>
       <button type="button" disabled={controlBusy} onClick={() => openBulkControl('edit')} className="btn btn-ghost">
-        Allow all edit again
+        All edit again
       </button>
       <button type="button" disabled={controlBusy} onClick={() => openBulkControl('unlock')} className="btn btn-ghost">
         Unlock all
@@ -1005,8 +1005,6 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
           </div>
         </div>
         <div className="form-topbar-actions">
-          {session?.role === 'staff' && <GroupChat actor={session.username} label="Report" mode="report" />}
-          {(adminSession || oauthIsAdmin) && <GroupChat actor="admin" label="Report" mode="report" reportTargets={reportTargets} />}
           {oauthProfile && (
             <div className="form-user-badge">
               <strong>Hello, {profileLabel}</strong>
@@ -1014,6 +1012,8 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
               <span>Role: {oauthProfile.role}</span>
             </div>
           )}
+          {session?.role === 'staff' && <GroupChat actor={session.username} label="Report" mode="report" />}
+          {(adminSession || oauthIsAdmin) && <GroupChat actor="admin" label="Report" mode="report" reportTargets={reportTargets} />}
           {(adminSession || oauthIsAdmin) && (
             <button
               type="button"
