@@ -125,21 +125,28 @@ const fetchMiniGameRanking = async (wave: number): Promise<MiniGameRank[]> => {
 }
 
 const fetchLadderRanking = async (wave: number): Promise<MiniGameRank[]> => {
-  const query = `${getWaveSheetQuery(wave)}&range=${encodeURIComponent('Y20:Y31')}`
+  const query = `${getWaveSheetQuery(wave)}&range=${encodeURIComponent('Y5:Y16')}`
   const rows = await fetchSheetRows(query)
-  return Array.from({ length: 12 }, (_, i) => {
-    const rankRaw = rows?.[i]?.c?.[0]?.v
-    const rank = parseInt(String(rankRaw ?? ''))
+  const ladderRows = Array.from({ length: 12 }, (_, i) => {
+    const amountRaw = cellValue(rows?.[i]?.c?.[0])
     return {
-      rank: Number.isFinite(rank) ? rank : null,
+      rank: null,
       baan: i + 1,
-      reward: null,
+      reward: parseSheetNumber(amountRaw) ?? 0,
     }
   }).sort((a, b) => {
-    const rankA = a.rank ?? Number.POSITIVE_INFINITY
-    const rankB = b.rank ?? Number.POSITIVE_INFINITY
-    return rankA - rankB || (a.baan ?? 99) - (b.baan ?? 99)
+    const amountA = a.reward ?? Number.NEGATIVE_INFINITY
+    const amountB = b.reward ?? Number.NEGATIVE_INFINITY
+    return amountB - amountA || (a.baan ?? 99) - (b.baan ?? 99)
   })
+  return withCompetitionRanks(ladderRows, row => row.reward ?? Number.NEGATIVE_INFINITY)
+}
+
+const formatSignedMoney = (amount: number | null) => {
+  if (amount === null) return '-'
+  if (amount > 0) return `+${amount.toLocaleString()}`
+  if (amount < 0) return `-${Math.abs(amount).toLocaleString()}`
+  return '0'
 }
 
 const fetchEventRank = async (wave: number, baan: number) => {
@@ -588,6 +595,8 @@ function FinanceHistory({
     miniGameRanking.slice(6, 12),
   ]
   const showRankingRewards = rankingKind === 'bet-return'
+  const showLadderAmounts = rankingKind === 'ladder'
+  const showRankingRightValue = showRankingRewards || showLadderAmounts
   const rankingTitle = rankingKind === 'ladder'
     ? 'ประกาศอันดับเงินจากการเล่น "เกมพลิกเกม - บันไดงูพิสดาร"'
     : 'ประกาศผลการเล่นเกมเดี่ยว (นำมาคิดผลการแทงม้า)'
@@ -685,7 +694,7 @@ function FinanceHistory({
                           key={`${row.baan ?? 'unknown'}-${row.rank ?? 'blank'}-${columnIndex}-${rowIndex}`}
                           className={clsx(
                             'mini-game-ranking-row',
-                            !showRankingRewards && 'is-no-reward',
+                            !showRankingRightValue && 'is-no-reward',
                             row.rank !== null && row.rank <= 3 && 'is-top-rank',
                             row.rank === 1 && 'is-rank-1',
                             row.rank === 2 && 'is-rank-2',
@@ -702,17 +711,23 @@ function FinanceHistory({
                               <div className="mini-game-ranking-player-note">บ้านที่คุณแทง</div>
                             )}
                           </div>
-                          {showRankingRewards && (
-                            <div className="mini-game-ranking-reward">
-                              <div className="mini-game-ranking-reward-label">ผลตอบแทน</div>
+                          {showRankingRightValue && (
+                            <div className={clsx('mini-game-ranking-reward', showLadderAmounts && 'is-ladder-amount')}>
+                              <div className="mini-game-ranking-reward-label">
+                                {showLadderAmounts ? 'เงินที่ได้' : 'ผลตอบแทน'}
+                              </div>
                               <div
                                 className={clsx(
                                   'mini-game-ranking-reward-value',
-                                  row.reward !== null && row.reward >= 100 && 'is-reward-good',
-                                  row.reward !== null && row.reward < 99 && 'is-reward-bad'
+                                  showRankingRewards && row.reward !== null && row.reward >= 100 && 'is-reward-good',
+                                  showRankingRewards && row.reward !== null && row.reward < 99 && 'is-reward-bad',
+                                  showLadderAmounts && row.reward !== null && row.reward > 0 && 'is-reward-good',
+                                  showLadderAmounts && row.reward !== null && row.reward < 0 && 'is-reward-bad'
                                 )}
                               >
-                                {row.reward !== null ? `${row.reward.toLocaleString()}%` : '-'}
+                                {showLadderAmounts
+                                  ? formatSignedMoney(row.reward)
+                                  : row.reward !== null ? `${row.reward.toLocaleString()}%` : '-'}
                               </div>
                             </div>
                           )}

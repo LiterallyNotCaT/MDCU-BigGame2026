@@ -2115,7 +2115,30 @@ form .btn.w-full {
   font-weight: 900;
   animation: eventRankPop 360ms ease-out both;
 }
-.event-rank-item span {
+.event-rank-item.is-top-rank {
+  border-color: #f1d073;
+  background: linear-gradient(135deg, #fff7d6, #ffffff 72%);
+}
+.event-rank-item.is-rank-1 {
+  border-color: #facc15;
+  background:
+    linear-gradient(135deg, rgba(255,251,235,0.98), rgba(250,204,21,0.24) 36%, rgba(255,255,255,0.98) 74%),
+    #fffbeb;
+  box-shadow: 0 8px 20px rgba(250, 204, 21, 0.18);
+}
+.event-rank-item.is-rank-2 {
+  border-color: #cbd5e1;
+  background:
+    linear-gradient(135deg, rgba(255,255,255,0.96), rgba(226,232,240,0.96) 36%, rgba(255,255,255,0.98) 72%),
+    #f8fafc;
+}
+.event-rank-item.is-rank-3 {
+  border-color: #d97706;
+  background:
+    linear-gradient(135deg, rgba(255,247,237,0.98), rgba(217,119,6,0.2) 38%, rgba(255,255,255,0.98) 74%),
+    #fff7ed;
+}
+.event-rank-number {
   display: grid;
   place-items: center;
   width: 30px;
@@ -2124,6 +2147,21 @@ form .btn.w-full {
   background: #2563eb;
   color: #ffffff;
   font-weight: 950;
+}
+.event-rank-item.is-rank-1 .event-rank-number {
+  background: linear-gradient(135deg, #fff7b0 0%, #facc15 48%, #fff8d6 100%);
+  color: #1d2433;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.82), 0 6px 14px rgba(250, 204, 21, 0.28);
+}
+.event-rank-item.is-rank-2 .event-rank-number {
+  background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 48%, #f8fafc 100%);
+  color: #334155;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.95), 0 6px 14px rgba(148, 163, 184, 0.24);
+}
+.event-rank-item.is-rank-3 .event-rank-number {
+  background: linear-gradient(135deg, #ffd29a 0%, #d97706 48%, #fff0d8 100%);
+  color: #ffffff;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.56), 0 6px 14px rgba(217, 119, 6, 0.24);
 }
 .event-rank-item strong {
   min-width: 0;
@@ -3285,12 +3323,14 @@ form .btn.w-full {
     grid-template-columns: 1fr;
   }
   .mini-game-ranking-row {
+    grid-template-columns: 42px minmax(0, 1fr) minmax(66px, auto);
+  }
+  .mini-game-ranking-row.is-no-reward {
     grid-template-columns: 42px minmax(0, 1fr);
   }
   .mini-game-ranking-reward {
-    grid-column: 2;
-    justify-self: start;
-    text-align: left;
+    justify-self: end;
+    text-align: right;
   }
 }
 .history-wave-divider-label {
@@ -4463,7 +4503,8 @@ form .btn.w-full {
   gap: 5px;
   justify-content: flex-start;
   width: 100%;
-  margin: 0 0 10px;
+  margin: 4px 0 8px;
+  padding: 4px 0 3px;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: thin;

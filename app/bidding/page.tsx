@@ -9,7 +9,7 @@ import GroupChat from '@/components/GroupChat'
 import { useWaveOwnership } from '@/components/OwnershipHistory'
 import Timer from '@/components/Timer'
 import clsx from 'clsx'
-import { Landmark, LogOut, Sparkles } from 'lucide-react'
+import { Crown, Landmark, LogOut, Sparkles } from 'lucide-react'
 import { HOUSE_NAMES, SHEET_ID, getWaveSheetQuery } from '@/lib/constants'
 import {
   getGameState, saveSubmission, getSubmissionsForBaan,
@@ -380,8 +380,17 @@ function EventGamePanel({ baan, wave, isOpen, showSolution }: { baan: number; wa
         <div className="event-rank-sidebar-title">Rank</div>
         <div className="event-rank-list">
         {(status?.results ?? []).length ? (status?.results ?? []).map(item => (
-          <div key={`${item.rank}-${item.baan}`} className="event-rank-item">
-            <span>{item.rank}</span>
+          <div
+            key={`${item.rank}-${item.baan}`}
+            className={clsx(
+              'event-rank-item',
+              item.rank <= 3 && 'is-top-rank',
+              item.rank === 1 && 'is-rank-1',
+              item.rank === 2 && 'is-rank-2',
+              item.rank === 3 && 'is-rank-3',
+            )}
+          >
+            <span className="event-rank-number">{item.rank}</span>
             <strong>{HOUSE_NAMES[item.baan]}</strong>
           </div>
         )) : (
@@ -436,7 +445,11 @@ function BiddingGame({ baan }: { baan:number }) {
   const draftKey = `biggame_bidding_draft:${baan}:${gs.currentWave}:${draftMode}`
   const currentSubmission = getSubmissionsForBaan(baan).find(s => s.wave === gs.currentWave)
   const priorBetSpend = !isBetMode ? sheetBetSpend || currentSubmission?.betAmount || 0 : 0
+  const sheetFinalBalance = sheetInput?.currentBalance || balance
   const effectiveBalance = Math.max(0, balance - priorBetSpend)
+  const cartDisplayBalance = gs.showResults === true ? sheetFinalBalance : effectiveBalance - totalBet
+  const betBalance = gs.showResults === true ? sheetFinalBalance : balance
+  const betAfterBalance = gs.showResults === true ? sheetFinalBalance : balance - betSpend
   const canChooseKingDisaster = isKing || currentKing === baan
   const canEditBid = gs.isOpen && !isBetMode && !isEventMode && !isSelectDisasterPhase
   const canSelectKingDisaster = gs.isOpen && isSelectDisasterPhase && canChooseKingDisaster
@@ -848,7 +861,7 @@ function BiddingGame({ baan }: { baan:number }) {
           <HomeButton className="bg-white/10 border-white/20 text-white hover:text-white" />
           <div className="wire-title">ลงทุนเกาะรอบที่ {gs.currentWave}</div>
           <div className="wire-title flex items-center gap-3">
-            {canChooseKingDisaster && <Sparkles size={24} className="text-yellow-200" />}
+            {currentKing === baan && <Crown size={26} className="text-yellow-200 drop-shadow-sm" />}
             {HOUSE_NAMES[baan]}
           </div>
         </div>
@@ -862,7 +875,6 @@ function BiddingGame({ baan }: { baan:number }) {
           <div className={clsx('wire-pill-row', isBetMode && 'wire-pill-row-bet', isEventMode && 'wire-pill-row-event')}>
             <div className="wire-pill-status-group">
               <div className="wire-pill wire-pill-game">{isEventMode ? 'Event game' : isBetMode ? 'Bet game' : 'Bid game'}</div>
-              {!isEventMode && <div className="wire-pill wire-pill-balance">Balance : {effectiveBalance.toLocaleString()}</div>}
               {!isBetMode && !isEventMode && <div className="wire-pill wire-pill-king">King : {currentKing ? HOUSE_NAMES[currentKing] : '-'}</div>}
               <div className={clsx('wire-pill-state badge', gs.isOpen?'badge-green':'badge-red')}>
                 <span className={clsx('status-dot', gs.isOpen?'online':'offline')} />
@@ -931,12 +943,12 @@ function BiddingGame({ baan }: { baan:number }) {
                       <div className="sm:col-span-2 grid grid-cols-2 gap-3">
                         <div className="colorful-box colorful-box-blue rounded-lg border border-blue-100 bg-blue-50 px-4 py-3">
                           <div className="text-label">Balance</div>
-                          <div className="font-mono text-xl font-bold text-slate-900">{balance.toLocaleString()}</div>
+                          <div className="font-mono text-xl font-bold text-slate-900">{betBalance.toLocaleString()}</div>
                         </div>
                         <div className="colorful-box colorful-box-gold rounded-lg border border-blue-100 bg-blue-50 px-4 py-3">
                           <div className="text-label">After Bet</div>
-                          <div className={clsx('font-mono text-xl font-bold', balance - betSpend < 0 ? 'text-red-600' : 'text-slate-900')}>
-                            {(balance - betSpend).toLocaleString()}
+                          <div className={clsx('font-mono text-xl font-bold', betAfterBalance < 0 ? 'text-red-600' : 'text-slate-900')}>
+                            {betAfterBalance.toLocaleString()}
                           </div>
                         </div>
                       </div>
@@ -978,7 +990,7 @@ function BiddingGame({ baan }: { baan:number }) {
 
             {!isBetMode && !isEventMode && (
               <aside className="wire-panel wire-side-panel">
-                <BiddingCart baan={baan} balance={effectiveBalance} items={cart} isKing={canChooseKingDisaster}
+                <BiddingCart baan={baan} balance={effectiveBalance} displayBalance={cartDisplayBalance} items={cart} isKing={canChooseKingDisaster}
                   kingDisaster={kingDis}
                   onUpdate={handleCartUpdate}
                   onKingDisaster={handleKingDisasterUpdate}

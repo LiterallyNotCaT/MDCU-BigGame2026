@@ -9,6 +9,7 @@ interface CartItem { area: string; amount: number }
 interface BiddingCartProps {
   baan:          number
   balance:       number
+  displayBalance?: number
   items:         CartItem[]
   isKing:        boolean
   kingDisaster:  number | null
@@ -33,7 +34,7 @@ function sanitizeMoneyInput(value: string) {
 }
 
 function BiddingCart({
-  baan, balance, items, isKing, kingDisaster,
+  baan, balance, displayBalance, items, isKing, kingDisaster,
   onUpdate, onKingDisaster, onSubmit, isSaved, savedAt, isOpen,
   isSyncing = false, syncLabel = 'Sending to admin...', bidOpen = isOpen, disasterOpen = isOpen && isKing, isDisasterPhase = false,
 }: BiddingCartProps) {
@@ -47,7 +48,7 @@ function BiddingCart({
     return !Number.isFinite(item.amount) || item.amount < 100 || item.amount > max
   }
   const totalBet   = items.reduce((s,i)=>s+i.amount, 0)
-  const remaining  = balance - totalBet
+  const remaining  = displayBalance ?? balance - totalBet
   const overBudget = remaining < 0
   const hasInvalidAmount = items.some(isAmountInvalid)
   const usagePct   = balance > 0 ? Math.min(1, totalBet / balance) : 0

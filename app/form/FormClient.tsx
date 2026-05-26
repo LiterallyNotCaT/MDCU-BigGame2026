@@ -1177,15 +1177,17 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
                           disabled={!isAdmin}
                         />
                       </label>
-                      <label>
-                        <span>Houses playing in selected round</span>
-                        <input
-                          value={participantsByRound[selectedRound] ?? ''}
-                          onChange={event => updateParticipants(selectedRound, event.target.value)}
-                          onBlur={event => updateParticipants(selectedRound, defaultParticipants(event.target.value))}
-                          disabled={!selectedCanEdit}
-                        />
-                      </label>
+                      {isAdmin && (
+                        <label>
+                          <span>Houses playing in selected round</span>
+                          <input
+                            value={participantsByRound[selectedRound] ?? ''}
+                            onChange={event => updateParticipants(selectedRound, event.target.value)}
+                            onBlur={event => updateParticipants(selectedRound, defaultParticipants(event.target.value))}
+                            disabled={!selectedCanEdit}
+                          />
+                        </label>
+                      )}
                     </>
                   </div>
                 )}
