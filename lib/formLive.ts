@@ -1,5 +1,5 @@
 import type { ScoringFormState } from '@/lib/forms'
-import { redisGetJson, redisSetJson } from '@/lib/redisStore'
+import { redisDeleteKey, redisGetJson, redisSetJson, redisSetJsonIfNotExists } from '@/lib/redisStore'
 
 export type FormLiveRound = {
   confirmed: boolean
@@ -28,6 +28,10 @@ type RoundPatch = {
 
 function formLiveKey(formKey: string) {
   return `biggame_form_live:${Buffer.from(String(formKey)).toString('base64url')}`
+}
+
+function formSubmitClaimKey(formKey: string, roundIndex: number) {
+  return `biggame_form_submit_claim:${Buffer.from(`${formKey}:${roundIndex}`).toString('base64url')}`
 }
 
 function normalizeLiveState(formKey: string, value: unknown): FormLiveState {
@@ -88,12 +92,33 @@ export async function publishFormRoundPatch(formKey: string, patches: RoundPatch
     }
   }
 
+  await Promise.all(patches.map(async patch => {
+    if (!Number.isInteger(patch.index) || patch.index < 0 || patch.confirmed !== false) return
+    await releaseFormRoundSubmitClaim(key, patch.index)
+  }))
+
   await redisSetJson(formLiveKey(key), {
     formKey: key,
     version,
     updatedAt: now,
     rounds,
   } satisfies FormLiveState)
+}
+
+export async function claimFormRoundSubmit(formKey: string, roundIndex: number) {
+  const key = String(formKey || '').trim()
+  if (!key || !Number.isInteger(roundIndex) || roundIndex < 0) throw new Error('Invalid round')
+  return await redisSetJsonIfNotExists(
+    formSubmitClaimKey(key, roundIndex),
+    { formKey: key, roundIndex, claimedAt: new Date().toISOString() },
+    12 * 60 * 60,
+  )
+}
+
+export async function releaseFormRoundSubmitClaim(formKey: string, roundIndex: number) {
+  const key = String(formKey || '').trim()
+  if (!key || !Number.isInteger(roundIndex) || roundIndex < 0) return
+  await redisDeleteKey(formSubmitClaimKey(key, roundIndex))
 }
 
 export async function mergeFormLiveIntoState(state: ScoringFormState | null | undefined) {
@@ -149,13 +174,13 @@ export async function publishFormState(state: ScoringFormState | null | undefine
 }
 
 export async function assertFormRoundEditable(formKey: string, roundIndex: number, isAdmin: boolean) {
-  if (isAdmin) return
   if (!formKey || !Number.isInteger(roundIndex) || roundIndex < 0) throw new Error('Invalid round')
 
   const live = await readFormLiveState(formKey)
   const round = live.rounds[String(roundIndex)]
   if (!round) return
-  if (round.confirmed) throw new Error('This round is already confirmed')
+  if (round.confirmed) throw new Error("Can't send the data as there is already confirmation from another person.")
+  if (isAdmin) return
   if (round.locked) throw new Error('This round is locked')
   if (round.deadlineAt) {
     const deadlineMs = new Date(round.deadlineAt).getTime()

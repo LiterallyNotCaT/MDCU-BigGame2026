@@ -712,6 +712,10 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
       notify('err', validated.message || 'Invalid data')
       return
     }
+    if (!validated.values.some(value => String(value ?? '').trim())) {
+      notify('err', 'Please enter data before confirming.')
+      return
+    }
     if (!window.confirm('Do you confirm? Please check the information carefully before sending.')) return
 
     setSavingRound(roundIndex)

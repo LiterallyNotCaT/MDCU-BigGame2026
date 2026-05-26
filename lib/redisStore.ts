@@ -110,3 +110,31 @@ export async function redisSetJson(key: string, value: unknown) {
     await redisUrlCommand(['SET', key, JSON.stringify(value)])
   }
 }
+
+export async function redisSetJsonIfNotExists(key: string, value: unknown, ttlSeconds: number) {
+  const ttl = Math.max(30, Math.floor(ttlSeconds))
+  const restKv = getRestKvClient()
+  if (restKv) {
+    const result = await restKv.set(key, value, { nx: true, ex: ttl })
+    return result === 'OK'
+  }
+
+  if (process.env.REDIS_URL) {
+    const result = await redisUrlCommand(['SET', key, JSON.stringify(value), 'NX', 'EX', String(ttl)])
+    return result === 'OK'
+  }
+
+  throw new Error('Redis is required to prevent duplicate form submits')
+}
+
+export async function redisDeleteKey(key: string) {
+  const restKv = getRestKvClient()
+  if (restKv) {
+    await restKv.del(key)
+    return
+  }
+
+  if (process.env.REDIS_URL) {
+    await redisUrlCommand(['DEL', key])
+  }
+}
