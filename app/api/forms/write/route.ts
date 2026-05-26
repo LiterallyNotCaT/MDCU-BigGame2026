@@ -1,8 +1,7 @@
 import { after, NextResponse } from 'next/server'
 import { auth, isAllowedDocChulaEmail } from '@/auth'
 import {
-  assertFormRoundEditable,
-  claimFormRoundSubmit,
+  claimAndPublishFormRoundSubmit,
   publishFormRoundPatch,
   releaseFormRoundSubmitClaim,
 } from '@/lib/formLive'
@@ -38,20 +37,13 @@ export async function POST(req: Request) {
       return jsonError('Please enter data before confirming.', 400)
     }
 
-    await assertFormRoundEditable(formKey, roundIndex, isAdmin)
-    const claimed = await claimFormRoundSubmit(formKey, roundIndex)
-    if (!claimed) {
-      return jsonError("Can't send the data as there is already confirmation from another person.", 409)
-    }
-
     try {
-      await publishFormRoundPatch(formKey, [{
-        index: roundIndex,
+      await claimAndPublishFormRoundSubmit(formKey, roundIndex, isAdmin, {
         locked: true,
         saving: true,
         error: '',
         participants: String(payload.participants ?? ''),
-      }])
+      })
 
       let email = ''
       if (payload.oauth === true) {

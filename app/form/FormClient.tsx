@@ -261,7 +261,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
   const [loadingConfig, setLoadingConfig] = useState(true)
   const [loadingState, setLoadingState] = useState(false)
   const [stateLoadError, setStateLoadError] = useState('')
-  const [savingRound, setSavingRound] = useState<number | null>(null)
+  const [savingRounds, setSavingRounds] = useState<Set<number>>(() => new Set())
   const [controlBusy, setControlBusy] = useState(false)
   const [bulkControl, setBulkControl] = useState<{ kind: BulkControlKind } | null>(null)
   const [notice, setNotice] = useState<{ type: 'ok' | 'err' | 'warn'; text: string } | null>(null)
@@ -597,7 +597,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     let timer: number | undefined
 
     const schedule = () => {
-      if (!stopped) timer = window.setTimeout(sync, 900)
+      if (!stopped) timer = window.setTimeout(sync, 500)
     }
 
     const sync = async () => {
@@ -724,7 +724,47 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     }
     if (!window.confirm('Do you confirm? Please check the information carefully before sending.')) return
 
-    setSavingRound(roundIndex)
+    setSavingRounds(prev => {
+      const next = new Set(prev)
+      next.add(roundIndex)
+      return next
+    })
+    setDraft(prev => prev.map((row, rowIndex) => row.map((cell, colIndex) => (
+      colIndex === roundIndex ? validated.values[rowIndex] ?? '' : cell
+    ))))
+    setParticipantsByRound(prev => prev.map((cell, index) => index === roundIndex ? participants : cell))
+    setState(prev => {
+      if (!prev || prev.form.formKey !== currentState.form.formKey) return prev
+      return {
+        ...prev,
+        fillToRank,
+        values: prev.values.map((row, rowIndex) => row.map((cell, colIndex) => (
+          colIndex === roundIndex ? validated.values[rowIndex] ?? '' : cell
+        ))),
+        rounds: prev.rounds.map((item, index) => index === roundIndex
+          ? { ...item, participants, confirmed: false, locked: true, saving: true, error: '' }
+          : item
+        ),
+      }
+    })
+    setStatesByFormKey(prev => {
+      const cached = prev[currentState.form.formKey]
+      if (!cached) return prev
+      return {
+        ...prev,
+        [currentState.form.formKey]: {
+          ...cached,
+          fillToRank,
+          values: cached.values.map((row, rowIndex) => row.map((cell, colIndex) => (
+            colIndex === roundIndex ? validated.values[rowIndex] ?? '' : cell
+          ))),
+          rounds: cached.rounds.map((item, index) => index === roundIndex
+            ? { ...item, participants, confirmed: false, locked: true, saving: true, error: '' }
+            : item
+          ),
+        },
+      }
+    })
     try {
       const response = await fetchJson<{ queued?: boolean; message?: string }>('/api/forms/write', {
         method: 'POST',
@@ -739,43 +779,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
           values: validated.values,
         }),
       })
-      setDraft(prev => prev.map((row, rowIndex) => row.map((cell, colIndex) => (
-        colIndex === roundIndex ? validated.values[rowIndex] ?? '' : cell
-      ))))
-      setParticipantsByRound(prev => prev.map((cell, index) => index === roundIndex ? participants : cell))
       if (response.queued) {
-        setState(prev => {
-          if (!prev || prev.form.formKey !== currentState.form.formKey) return prev
-          return {
-            ...prev,
-            fillToRank,
-            values: prev.values.map((row, rowIndex) => row.map((cell, colIndex) => (
-              colIndex === roundIndex ? validated.values[rowIndex] ?? '' : cell
-            ))),
-            rounds: prev.rounds.map((item, index) => index === roundIndex
-              ? { ...item, participants, confirmed: false, locked: true, saving: true, error: '' }
-              : item
-            ),
-          }
-        })
-        setStatesByFormKey(prev => {
-          const cached = prev[currentState.form.formKey]
-          if (!cached) return prev
-          return {
-            ...prev,
-            [currentState.form.formKey]: {
-              ...cached,
-              fillToRank,
-              values: cached.values.map((row, rowIndex) => row.map((cell, colIndex) => (
-                colIndex === roundIndex ? validated.values[rowIndex] ?? '' : cell
-              ))),
-              rounds: cached.rounds.map((item, index) => index === roundIndex
-                ? { ...item, participants, confirmed: false, locked: true, saving: true, error: '' }
-                : item
-              ),
-            },
-          }
-        })
         notify('ok', response.message || 'Sending to sheet...')
         return
       }
@@ -813,9 +817,38 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
       })
       notify('ok', `Saved ${round.label}`)
     } catch (error) {
-      notify('err', error instanceof Error ? error.message : String(error))
+      const message = error instanceof Error ? error.message : String(error)
+      setState(prev => {
+        if (!prev || prev.form.formKey !== currentState.form.formKey) return prev
+        return {
+          ...prev,
+          rounds: prev.rounds.map((item, index) => index === roundIndex
+            ? { ...item, locked: false, saving: false, error: message }
+            : item
+          ),
+        }
+      })
+      setStatesByFormKey(prev => {
+        const cached = prev[currentState.form.formKey]
+        if (!cached) return prev
+        return {
+          ...prev,
+          [currentState.form.formKey]: {
+            ...cached,
+            rounds: cached.rounds.map((item, index) => index === roundIndex
+              ? { ...item, locked: false, saving: false, error: message }
+              : item
+            ),
+          },
+        }
+      })
+      notify('err', message)
     } finally {
-      setSavingRound(null)
+      setSavingRounds(prev => {
+        const next = new Set(prev)
+        next.delete(roundIndex)
+        return next
+      })
     }
   }
 
@@ -1226,8 +1259,8 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
                         <th>Confirm</th>
                         {visibleRounds.map((round, roundIndex) => {
                           const timedOut = Boolean(round.deadlineAt && Date.now() > new Date(round.deadlineAt).getTime())
-                          const isSending = savingRound === roundIndex || round.saving === true
-                          const disabled = savingRound !== null || isSending || !canEditCurrentForm || (!isAdmin && (round.confirmed || round.locked || timedOut))
+                          const isSending = savingRounds.has(roundIndex) || round.saving === true
+                          const disabled = isSending || !canEditCurrentForm || (!isAdmin && (round.confirmed || round.locked || timedOut))
                           return (
                             <td key={round.index} className={clsx(selectedRound === roundIndex && 'active-round')}>
                               <button

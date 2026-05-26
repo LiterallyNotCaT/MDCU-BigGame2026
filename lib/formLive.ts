@@ -69,11 +69,7 @@ export async function readFormLiveState(formKey: string) {
   return normalizeLiveState(key, await redisGetJson<FormLiveState>(formLiveKey(key)))
 }
 
-export async function publishFormRoundPatch(formKey: string, patches: RoundPatch[]) {
-  const key = String(formKey || '').trim()
-  if (!key || !patches.length) return
-
-  const existing = await readFormLiveState(key)
+function nextLiveStateFromPatches(key: string, existing: FormLiveState, patches: RoundPatch[]) {
   const now = new Date().toISOString()
   const version = Math.max(Date.now(), existing.version + 1)
   const rounds = { ...existing.rounds }
@@ -102,17 +98,47 @@ export async function publishFormRoundPatch(formKey: string, patches: RoundPatch
     }
   }
 
+  return {
+    formKey: key,
+    version,
+    updatedAt: now,
+    rounds,
+  } satisfies FormLiveState
+}
+
+export async function publishFormRoundPatch(formKey: string, patches: RoundPatch[]) {
+  const key = String(formKey || '').trim()
+  if (!key || !patches.length) return
+
+  const existing = await readFormLiveState(key)
+
   await Promise.all(patches.map(async patch => {
     if (!Number.isInteger(patch.index) || patch.index < 0 || patch.confirmed !== false) return
     await releaseFormRoundSubmitClaim(key, patch.index)
   }))
 
-  await redisSetJson(formLiveKey(key), {
-    formKey: key,
-    version,
-    updatedAt: now,
-    rounds,
-  } satisfies FormLiveState)
+  await redisSetJson(formLiveKey(key), nextLiveStateFromPatches(key, existing, patches))
+}
+
+export async function claimAndPublishFormRoundSubmit(formKey: string, roundIndex: number, isAdmin: boolean, patch: Omit<RoundPatch, 'index'>) {
+  const key = String(formKey || '').trim()
+  if (!key || !Number.isInteger(roundIndex) || roundIndex < 0) throw new Error('Invalid round')
+
+  const existing = await readFormLiveState(key)
+  const round = existing.rounds[String(roundIndex)]
+  if (round?.confirmed) throw new Error("Can't send the data as there is already confirmation from another person.")
+  if (!isAdmin) {
+    if (round?.locked) throw new Error('This round is locked')
+    if (round?.deadlineAt) {
+      const deadlineMs = new Date(round.deadlineAt).getTime()
+      if (Number.isFinite(deadlineMs) && Date.now() > deadlineMs) throw new Error('This round is timed out')
+    }
+  }
+
+  const claimed = await claimFormRoundSubmit(key, roundIndex)
+  if (!claimed) throw new Error("Can't send the data as there is already confirmation from another person.")
+
+  await redisSetJson(formLiveKey(key), nextLiveStateFromPatches(key, existing, [{ index: roundIndex, ...patch }]))
 }
 
 export async function claimFormRoundSubmit(formKey: string, roundIndex: number) {
