@@ -4048,10 +4048,14 @@ form .btn.w-full {
   overflow-y: auto !important;
 }
 .form-topbar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   justify-content: flex-start;
-  gap: 12px;
-  flex-wrap: nowrap;
+  gap: 10px;
+  overflow-x: auto;
+  overflow-y: visible;
+  scrollbar-width: thin;
 }
 .form-topbar-left,
 .form-topbar-actions {
@@ -4064,15 +4068,50 @@ form .btn.w-full {
 .form-topbar-left {
   flex: 0 1 auto;
   min-width: max-content;
+  gap: 8px;
 }
 .form-topbar-left .wire-title {
   white-space: nowrap;
 }
 .form-topbar-actions {
-  flex: 1 1 auto;
-  justify-content: flex-start;
+  flex: 0 1 auto;
+  justify-content: flex-end;
   flex-wrap: nowrap;
   overflow: visible;
+  gap: 8px;
+  min-width: 0;
+  margin-left: auto;
+  padding-left: 0;
+  align-self: center;
+  justify-self: end;
+}
+.form-topbar .home-button {
+  min-height: 34px !important;
+  padding: 7px 12px !important;
+  gap: 7px !important;
+  border-radius: 12px !important;
+}
+.form-topbar .home-button span {
+  font-size: 0.72rem !important;
+}
+.form-topbar .home-button svg {
+  width: 13px !important;
+  height: 13px !important;
+}
+.form-topbar-actions .btn,
+.form-topbar-actions .group-chat-trigger {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 6px 10px;
+  border-radius: 11px;
+  font-size: 0.74rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+.form-topbar .group-chat-trigger {
+  min-height: 32px !important;
+  padding: 6px 10px !important;
+  font-size: 0.74rem !important;
 }
 .form-topbar-subtitle {
   margin-top: 2px;
@@ -4135,15 +4174,16 @@ form .btn.w-full {
 .form-user-badge {
   display: grid;
   gap: 1px;
-  flex: 0 1 280px;
-  min-width: 180px;
-  max-width: 310px;
+  flex: 0 0 auto;
+  width: max-content;
+  min-width: 0;
+  max-width: clamp(150px, 17vw, 230px);
   border: 1px solid rgba(191,219,254,0.62);
   border-radius: 14px;
   background: rgba(255,255,255,0.14);
-  padding: 7px 11px;
+  padding: 6px 10px;
   color: rgba(255,255,255,0.9);
-  line-height: 1.15;
+  line-height: 1.05;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.14);
 }
 .form-user-badge strong,
@@ -4154,12 +4194,12 @@ form .btn.w-full {
   white-space: nowrap;
 }
 .form-user-badge strong {
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   font-weight: 1000;
 }
 .form-user-badge span {
   color: rgba(255,255,255,0.72);
-  font-size: 0.68rem;
+  font-size: 0.62rem;
   font-weight: 800;
 }
 .form-admin-login-button {
@@ -4224,14 +4264,14 @@ form .btn.w-full {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  min-height: 34px;
+  gap: 5px;
+  min-height: 30px;
   border: 1px solid #cbd8ea;
-  border-radius: 11px;
+  border-radius: 9px;
   background: #fff;
-  padding: 7px 11px;
+  padding: 5px 9px;
   color: #334155;
-  font-size: 0.78rem;
+  font-size: 0.7rem;
   font-weight: 900;
   box-shadow: none;
   transform: none !important;
@@ -4255,6 +4295,18 @@ form .btn.w-full {
   flex: 0 0 auto;
   width: 12px;
   height: 12px;
+}
+.form-round-chip {
+  justify-content: center;
+  min-width: 78px;
+  min-height: 34px;
+  padding: 7px 12px;
+  border-radius: 10px;
+  font-size: 0.78rem;
+}
+.form-round-chip svg {
+  width: 13px;
+  height: 13px;
 }
 .form-subtab.active,
 .form-round-chip.active {
@@ -4347,12 +4399,16 @@ form .btn.w-full {
   position: relative;
   z-index: 0;
   clear: both;
-  margin: 12px 0;
+  margin: 8px 0 4px;
   align-items: center;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
 }
 .form-settings-row {
-  display: grid;
-  grid-template-columns: minmax(130px, 180px) minmax(220px, 1fr) auto;
+  display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   align-items: end;
   margin: 12px 0;
@@ -4369,6 +4425,13 @@ form .btn.w-full {
   color: #475569;
   font-size: 0.72rem;
   font-weight: 900;
+}
+.form-settings-row label:first-child {
+  flex: 0 0 180px;
+}
+.form-settings-row label:nth-child(2) {
+  flex: 0 1 760px;
+  max-width: 760px;
 }
 .form-settings-row input,
 .form-score-table input {
@@ -4396,18 +4459,25 @@ form .btn.w-full {
 }
 .form-admin-controls {
   display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
+  flex-wrap: nowrap;
+  gap: 5px;
   justify-content: flex-start;
-}
-.form-round-toolbar > .form-admin-controls {
-  margin-left: auto;
-  justify-content: flex-end;
+  width: 100%;
+  margin: 0 0 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
 }
 .form-admin-controls .btn {
-  min-height: 32px;
-  padding: 6px 9px;
-  font-size: 0.7rem;
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 7px 12px;
+  border-radius: 10px;
+  font-size: 0.78rem;
+}
+.form-admin-controls .btn svg {
+  width: 14px;
+  height: 14px;
 }
 .form-control-dialog-backdrop {
   position: fixed;
@@ -4490,6 +4560,9 @@ form .btn.w-full {
   border-spacing: 0;
   background: #fff;
 }
+.form-score-table.compact-rounds {
+  min-width: 440px;
+}
 .form-score-table th,
 .form-score-table td {
   border-bottom: 1px solid #e2e8f0;
@@ -4541,15 +4614,15 @@ form .btn.w-full {
 }
 .form-confirm-btn {
   width: 100%;
-  min-height: 36px;
+  min-height: 34px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  border-radius: 10px;
+  gap: 6px;
+  border-radius: 9px;
   background: #2563eb;
   color: #fff;
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   font-weight: 1000;
 }
 .form-confirm-btn.confirmed {
@@ -4593,7 +4666,7 @@ form .btn.w-full {
   margin: 0;
 }
 .form-page .form-round-toolbar {
-  min-height: 40px;
+  min-height: 0;
   align-content: start;
 }
 .form-page .form-table-wrap {
@@ -4611,10 +4684,29 @@ form .btn.w-full {
   transition-property: background-color, border-color, color, opacity;
 }
 
-@media (max-width: 900px), (pointer: coarse) {
+@media (max-width: 1100px), (pointer: coarse) {
   .form-shell,
   .form-workspace {
     box-shadow: 0 8px 22px rgba(15,23,42,0.06);
+  }
+
+  .form-topbar {
+    grid-template-columns: 1fr;
+  }
+
+  .form-topbar-left {
+    flex: 1 1 100%;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .form-topbar-actions {
+    flex: 1 1 100%;
+    width: 100%;
+    justify-content: flex-start;
+    align-self: flex-start;
+    justify-self: start;
+    margin-left: 0;
   }
 
   .form-score-table {
@@ -4630,80 +4722,129 @@ form .btn.w-full {
 
   .form-topbar {
     min-height: auto;
-    flex-wrap: wrap;
-    align-items: flex-start;
-    gap: 7px;
-    padding: 8px 10px 10px;
+    display: grid;
+    grid-template-columns: 1fr;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 8px 9px;
+    overflow-x: hidden;
   }
 
   .form-topbar-left {
     flex: 1 1 100%;
     width: 100%;
-    gap: 8px;
+    min-width: 0;
+    gap: 6px;
   }
 
   .form-topbar-left .wire-title {
     min-width: 0;
-    font-size: clamp(0.92rem, 4.8vw, 1.12rem);
+    font-size: clamp(0.86rem, 4.4vw, 1.04rem);
     line-height: 1.08;
     overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  .form-topbar .home-button {
+    min-height: 30px !important;
+    padding: 5px 9px !important;
+    gap: 5px !important;
+    border-radius: 10px !important;
+  }
+
+  .form-topbar .home-button span {
+    font-size: 0.62rem !important;
+  }
+
+  .form-topbar .home-button svg {
+    width: 12px !important;
+    height: 12px !important;
   }
 
   .form-topbar-actions {
     flex: 1 1 100%;
     width: 100%;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     justify-content: flex-start;
     align-items: center;
-    gap: 6px;
+    align-self: flex-start;
+    justify-self: start;
+    gap: 3px;
+    margin-left: 0;
+    padding-left: 0;
+    overflow-x: hidden;
+    overflow-y: hidden;
+    padding-bottom: 2px;
+    scrollbar-width: none;
   }
 
   .form-topbar-actions .btn,
   .form-topbar-actions .group-chat-trigger {
-    flex: 0 0 auto;
-    min-height: 32px;
-    padding: 6px 8px;
-    font-size: 0.66rem;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 58px;
+    min-height: 25px;
+    padding: 4px 5px;
+    gap: 3px;
+    border-radius: 8px;
+    font-size: 0.52rem;
     line-height: 1;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .form-topbar .group-chat-trigger {
-    min-height: 32px !important;
-    padding: 6px 8px !important;
-    font-size: 0.66rem !important;
+    min-height: 25px !important;
+    padding: 4px 5px !important;
+    gap: 3px !important;
+    border-radius: 8px !important;
+    font-size: 0.52rem !important;
+    max-width: 58px !important;
+    overflow: hidden !important;
   }
 
   .form-user-badge {
-    flex: 1 1 128px;
+    flex: 1 1 76px;
     width: auto;
     min-width: 0;
-    max-width: 168px;
-    padding: 6px 8px;
-    border-radius: 12px;
+    max-width: 96px;
+    padding: 4px 6px;
+    border-radius: 9px;
+    line-height: 1;
   }
 
   .form-user-badge strong {
-    font-size: 0.72rem;
+    font-size: 0.56rem;
   }
 
   .form-user-badge span {
-    font-size: 0.6rem;
+    font-size: 0.48rem;
   }
 
   .form-topbar-actions .form-admin-status-button,
   .form-topbar-actions .form-logout-button {
-    padding-inline: 8px;
+    padding-inline: 5px;
+  }
+
+  .form-topbar-actions .btn svg,
+  .form-topbar-actions .group-chat-trigger svg {
+    width: 10px !important;
+    height: 10px !important;
   }
 
   .form-logout-button {
     margin-left: 0;
   }
 
+  .form-topbar-actions::-webkit-scrollbar {
+    display: none;
+  }
+
   .form-content {
     width: 100%;
     max-width: 100%;
-    padding: 10px;
+    padding: 8px 8px 82px;
   }
 
   .form-shell {
@@ -4717,9 +4858,10 @@ form .btn.w-full {
   }
 
   .form-tabs .btn {
-    min-height: 34px;
-    padding: 7px 10px;
-    font-size: 0.76rem;
+    min-height: 30px;
+    padding: 5px 8px;
+    border-radius: 9px;
+    font-size: 0.68rem;
   }
 
   .form-subtabs {
@@ -4728,15 +4870,16 @@ form .btn.w-full {
   }
 
   .form-subtab {
-    max-width: 96px;
-    min-height: 29px;
-    padding: 5px 7px;
-    font-size: 0.64rem;
+    max-width: 88px;
+    min-height: 27px;
+    padding: 4px 6px;
+    border-radius: 8px;
+    font-size: 0.58rem;
   }
 
   .form-workspace {
-    gap: 10px;
-    padding: 10px;
+    gap: 8px;
+    padding: 8px;
     border-radius: 14px;
   }
 
@@ -4757,50 +4900,79 @@ form .btn.w-full {
   }
 
   .form-round-toolbar {
-    gap: 5px;
+    flex-wrap: nowrap;
+    gap: 4px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 2px;
   }
 
   .form-round-chip {
-    flex: 1 1 calc(50% - 6px);
+    flex: 0 0 auto;
     justify-content: center;
-    max-width: 118px;
-    min-height: 30px;
-    padding: 5px 8px;
-    border-radius: 9px;
-    font-size: 0.68rem;
+    min-width: 52px;
+    max-width: none;
+    min-height: 24px;
+    padding: 3px 5px;
+    gap: 3px;
+    border-radius: 7px;
+    font-size: 0.53rem;
+  }
+
+  .form-round-chip svg {
+    width: 10px;
+    height: 10px;
   }
 
   .form-settings-row {
-    grid-template-columns: 1fr;
-    gap: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    align-items: end;
   }
 
   .form-settings-row label {
+    min-width: 0;
     font-size: 0.7rem;
   }
 
+  .form-settings-row label:first-child {
+    flex: 0 1 112px;
+  }
+
+  .form-settings-row label:nth-child(2) {
+    flex: 1 1 180px;
+  }
+
   .form-settings-row input {
-    min-height: 38px;
-    padding: 8px;
-    font-size: 0.8rem;
+    min-height: 34px;
+    padding: 7px;
+    font-size: 0.76rem;
   }
 
   .form-admin-controls {
-    width: 100%;
+    width: auto;
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
     justify-content: flex-start;
-    gap: 5px;
-  }
-
-  .form-round-toolbar > .form-admin-controls {
-    margin-left: 0;
-    justify-content: flex-start;
+    gap: 4px;
+    margin: 0 0 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
   }
 
   .form-admin-controls .btn {
-    flex: 1 1 calc(50% - 5px);
-    min-height: 30px;
-    padding: 5px 7px;
-    font-size: 0.65rem;
+    flex: 0 0 auto;
+    min-height: 24px;
+    padding: 3px 5px;
+    border-radius: 7px;
+    font-size: 0.53rem;
+    gap: 3px;
+  }
+
+  .form-admin-controls .btn svg {
+    width: 10px;
+    height: 10px;
   }
 
   .form-table-wrap {
@@ -4810,38 +4982,52 @@ form .btn.w-full {
   }
 
   .form-score-table {
-    min-width: 560px;
+    min-width: 520px;
     table-layout: fixed;
+  }
+
+  .form-score-table.compact-rounds {
+    min-width: 320px;
   }
 
   .form-score-table th,
   .form-score-table td {
-    padding: 5px;
+    padding: 4px;
   }
 
   .form-score-table th {
-    font-size: 0.68rem;
+    font-size: 0.62rem;
     white-space: normal;
     line-height: 1.15;
   }
 
   .form-score-table th:first-child {
-    min-width: 72px;
-    width: 72px;
+    min-width: 58px;
+    width: 58px;
+  }
+
+  .form-score-table.compact-rounds th:first-child {
+    min-width: 70px;
+    width: 70px;
   }
 
   .form-score-table input {
-    min-height: 34px;
-    border-radius: 9px;
-    padding: 6px 7px;
-    font-size: 0.78rem;
+    min-height: 30px;
+    border-radius: 8px;
+    padding: 5px 6px;
+    font-size: 0.72rem;
   }
 
   .form-confirm-btn {
-    min-height: 34px;
-    gap: 5px;
-    border-radius: 9px;
-    font-size: 0.7rem;
+    min-height: 30px;
+    gap: 4px;
+    border-radius: 8px;
+    font-size: 0.62rem;
+  }
+
+  .form-confirm-btn svg {
+    width: 11px;
+    height: 11px;
   }
 
   .form-score-note {
@@ -4862,11 +5048,13 @@ form .btn.w-full {
   .page-contact-footer {
     width: 100%;
     max-width: 100%;
-    margin-top: 14px;
-    padding: 0 8px 22px;
-    gap: 5px;
-    font-size: 0.76rem;
+    margin-top: 12px;
+    margin-bottom: 54px;
+    padding: 0 8px 64px;
+    gap: 6px;
+    font-size: 0.7rem;
     line-height: 1.25;
+    overflow: visible;
   }
 
   .form-footer > span,
@@ -4881,11 +5069,16 @@ form .btn.w-full {
 
   .contact-email-button {
     max-width: calc(100vw - 36px);
-    min-height: 30px;
-    padding: 4px 8px;
+    min-height: 28px;
+    padding: 4px 7px;
     overflow-wrap: anywhere;
     white-space: normal;
     line-height: 1.15;
+  }
+
+  .form-footer .contact-email-item,
+  .page-contact-footer .contact-email-item {
+    flex: 1 1 100%;
   }
 }
 .form-footer-note {

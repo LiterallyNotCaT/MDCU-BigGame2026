@@ -1160,7 +1160,6 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
                         </button>
                       )
                     })}
-                    {!showAutoControls && adminRoundControls}
                   </div>
                 )}
 
@@ -1188,12 +1187,13 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
                         />
                       </label>
                     </>
-                    {adminRoundControls}
                   </div>
                 )}
 
+                {isAdmin && adminRoundControls}
+
                 <div className="form-table-wrap">
-                  <table className="form-score-table">
+                  <table className={clsx('form-score-table', visibleRounds.length <= 2 && 'compact-rounds')}>
                     <thead>
                       <tr>
                         <th>{isScoreInputForm ? 'บ้าน' : 'Rank'}</th>
