@@ -45,6 +45,8 @@ type FormLiveState = {
   rounds: Record<string, {
     confirmed: boolean
     locked: boolean
+    saving?: boolean
+    error?: string
     deadlineAt: string
     participants: string
     values: string[]
@@ -323,6 +325,8 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
       if (
         round.confirmed === liveRound.confirmed
         && round.locked === liveRound.locked
+        && (round.saving || false) === (liveRound.saving || false)
+        && (round.error || '') === (liveRound.error || '')
         && (round.deadlineAt || '') === (liveRound.deadlineAt || '')
         && (round.participants || '') === (liveRound.participants || round.participants || '')
       ) return round
@@ -331,6 +335,8 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
         participants: liveRound.participants || round.participants,
         confirmed: liveRound.confirmed === true,
         locked: liveRound.locked === true,
+        saving: liveRound.saving === true,
+        error: liveRound.error || '',
         deadlineAt: liveRound.deadlineAt || '',
       }
     })
@@ -720,7 +726,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
 
     setSavingRound(roundIndex)
     try {
-      await fetchJson('/api/forms/write', {
+      const response = await fetchJson<{ queued?: boolean; message?: string }>('/api/forms/write', {
         method: 'POST',
         body: JSON.stringify({
           formKey: currentState.form.formKey,
@@ -737,6 +743,42 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
         colIndex === roundIndex ? validated.values[rowIndex] ?? '' : cell
       ))))
       setParticipantsByRound(prev => prev.map((cell, index) => index === roundIndex ? participants : cell))
+      if (response.queued) {
+        setState(prev => {
+          if (!prev || prev.form.formKey !== currentState.form.formKey) return prev
+          return {
+            ...prev,
+            fillToRank,
+            values: prev.values.map((row, rowIndex) => row.map((cell, colIndex) => (
+              colIndex === roundIndex ? validated.values[rowIndex] ?? '' : cell
+            ))),
+            rounds: prev.rounds.map((item, index) => index === roundIndex
+              ? { ...item, participants, confirmed: false, locked: true, saving: true, error: '' }
+              : item
+            ),
+          }
+        })
+        setStatesByFormKey(prev => {
+          const cached = prev[currentState.form.formKey]
+          if (!cached) return prev
+          return {
+            ...prev,
+            [currentState.form.formKey]: {
+              ...cached,
+              fillToRank,
+              values: cached.values.map((row, rowIndex) => row.map((cell, colIndex) => (
+                colIndex === roundIndex ? validated.values[rowIndex] ?? '' : cell
+              ))),
+              rounds: cached.rounds.map((item, index) => index === roundIndex
+                ? { ...item, participants, confirmed: false, locked: true, saving: true, error: '' }
+                : item
+              ),
+            },
+          }
+        })
+        notify('ok', response.message || 'Sending to sheet...')
+        return
+      }
       setState(prev => {
         if (!prev || prev.form.formKey !== currentState.form.formKey) return prev
         return {
@@ -746,7 +788,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
             colIndex === roundIndex ? validated.values[rowIndex] ?? '' : cell
           ))),
           rounds: prev.rounds.map((item, index) => index === roundIndex
-            ? { ...item, participants, confirmed: true, locked: false }
+            ? { ...item, participants, confirmed: true, locked: false, saving: false, error: '' }
             : item
           ),
         }
@@ -763,7 +805,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
               colIndex === roundIndex ? validated.values[rowIndex] ?? '' : cell
             ))),
             rounds: cached.rounds.map((item, index) => index === roundIndex
-              ? { ...item, participants, confirmed: true, locked: false }
+              ? { ...item, participants, confirmed: true, locked: false, saving: false, error: '' }
               : item
             ),
           },
@@ -1184,7 +1226,8 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
                         <th>Confirm</th>
                         {visibleRounds.map((round, roundIndex) => {
                           const timedOut = Boolean(round.deadlineAt && Date.now() > new Date(round.deadlineAt).getTime())
-                          const disabled = savingRound !== null || !canEditCurrentForm || (!isAdmin && (round.confirmed || round.locked || timedOut))
+                          const isSending = savingRound === roundIndex || round.saving === true
+                          const disabled = savingRound !== null || isSending || !canEditCurrentForm || (!isAdmin && (round.confirmed || round.locked || timedOut))
                           return (
                             <td key={round.index} className={clsx(selectedRound === roundIndex && 'active-round')}>
                               <button
@@ -1193,8 +1236,8 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
                                 onClick={() => confirmRound(roundIndex)}
                                 className={clsx('form-confirm-btn', round.confirmed && 'confirmed')}
                               >
-                                {savingRound === roundIndex ? 'Saving...' : round.confirmed ? 'Confirmed' : 'Confirm'}
-                                {!round.confirmed && <Send size={13} />}
+                                {isSending ? 'Sending...' : round.confirmed ? 'Confirmed' : 'Confirm'}
+                                {!round.confirmed && !isSending && <Send size={13} />}
                               </button>
                             </td>
                           )

@@ -4,6 +4,8 @@ import { redisDeleteKey, redisGetJson, redisSetJson, redisSetJsonIfNotExists } f
 export type FormLiveRound = {
   confirmed: boolean
   locked: boolean
+  saving: boolean
+  error: string
   deadlineAt: string
   participants: string
   values: string[]
@@ -21,6 +23,8 @@ type RoundPatch = {
   index: number
   confirmed?: boolean
   locked?: boolean
+  saving?: boolean
+  error?: string
   deadlineAt?: string
   participants?: string
   values?: string[]
@@ -47,6 +51,8 @@ function normalizeLiveState(formKey: string, value: unknown): FormLiveState {
       next[key] = {
         confirmed: item.confirmed === true,
         locked: item.locked === true,
+        saving: item.saving === true,
+        error: typeof item.error === 'string' ? item.error : '',
         deadlineAt: typeof item.deadlineAt === 'string' ? item.deadlineAt : '',
         participants: typeof item.participants === 'string' ? item.participants : '',
         values: Array.isArray(item.values) ? item.values.map(value => String(value ?? '')) : [],
@@ -77,6 +83,8 @@ export async function publishFormRoundPatch(formKey: string, patches: RoundPatch
     const previous = rounds[String(patch.index)] ?? {
       confirmed: false,
       locked: false,
+      saving: false,
+      error: '',
       deadlineAt: '',
       participants: '',
       values: [],
@@ -85,6 +93,8 @@ export async function publishFormRoundPatch(formKey: string, patches: RoundPatch
     rounds[String(patch.index)] = {
       confirmed: patch.confirmed === undefined ? previous.confirmed : patch.confirmed === true,
       locked: patch.locked === undefined ? previous.locked : patch.locked === true,
+      saving: patch.saving === undefined ? previous.saving : patch.saving === true,
+      error: patch.error === undefined ? previous.error : String(patch.error || ''),
       deadlineAt: patch.deadlineAt === undefined ? previous.deadlineAt : String(patch.deadlineAt || ''),
       participants: patch.participants === undefined ? previous.participants : String(patch.participants || ''),
       values: patch.values === undefined ? previous.values : patch.values.map(value => String(value ?? '')),
@@ -145,6 +155,8 @@ export async function mergeFormLiveIntoState(state: ScoringFormState | null | un
         participants: liveRound.participants || round.participants,
         confirmed: liveRound.confirmed === true,
         locked: liveRound.locked === true,
+        saving: liveRound.saving === true,
+        error: liveRound.error || '',
         deadlineAt: liveRound.deadlineAt || '',
       }
     }),
@@ -208,6 +220,8 @@ export async function publishFullFormState(state: ScoringFormState | null | unde
       index,
       confirmed: round.confirmed === true,
       locked: round.locked === true,
+      saving: round.saving === true,
+      error: round.error || '',
       deadlineAt: round.deadlineAt || '',
       participants: round.participants || '',
       values: state.values.map(row => row[index] ?? ''),

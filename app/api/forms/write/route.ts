@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+import { after, NextResponse } from 'next/server'
 import { auth, isAllowedDocChulaEmail } from '@/auth'
 import {
   assertFormRoundEditable,
@@ -48,36 +48,29 @@ export async function POST(req: Request) {
       await publishFormRoundPatch(formKey, [{
         index: roundIndex,
         locked: true,
+        saving: true,
+        error: '',
         participants: String(payload.participants ?? ''),
       }])
 
+      let email = ''
       if (payload.oauth === true) {
         const session = await auth()
-        const email = session?.user?.email ?? ''
+        email = session?.user?.email ?? ''
         if (!session?.user || !isAllowedDocChulaEmail(email)) throw new Error('Unauthorized')
-
-        const data = await callGas({
-          ...payload,
-          values,
-          email,
-          action: 'writeFormScoreOAuth',
-        })
-        await publishConfirmedRound(payload, values)
-        return NextResponse.json({ ok: true, message: data.message || 'Saved', data })
       }
 
-      const data = await callGas({
-        ...payload,
-        values,
-        action: 'writeFormScore',
+      after(() => persistFormWrite({ payload, values, email }))
+      return NextResponse.json({ ok: true, queued: true, message: 'Sending to sheet...' }, {
+        headers: { 'Cache-Control': 'no-store' },
       })
-      await publishConfirmedRound(payload, values)
-      return NextResponse.json({ ok: true, message: data.message || 'Saved', data })
     } catch (error) {
       await releaseFormRoundSubmitClaim(formKey, roundIndex)
       await publishFormRoundPatch(formKey, [{
         index: roundIndex,
         locked: false,
+        saving: false,
+        error: error instanceof Error ? error.message : String(error),
       }]).catch(err => {
         console.error('Form live unlock after failed write failed:', err)
       })
@@ -86,6 +79,41 @@ export async function POST(req: Request) {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     return jsonError(message, statusForGasError(message))
+  }
+}
+
+async function persistFormWrite({ payload, values, email }: { payload: Record<string, unknown>; values: string[]; email: string }) {
+  try {
+    if (payload.oauth === true) {
+      await callGas({
+        ...payload,
+        values,
+        email,
+        action: 'writeFormScoreOAuth',
+      })
+    } else {
+      await callGas({
+        ...payload,
+        values,
+        action: 'writeFormScore',
+      })
+    }
+    await publishConfirmedRound(payload, values)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    const formKey = String(payload.formKey || '')
+    const roundIndex = Number(payload.roundIndex)
+    await releaseFormRoundSubmitClaim(formKey, roundIndex).catch(err => {
+      console.error('Form submit claim release after background write failed:', err)
+    })
+    await publishFormRoundPatch(formKey, [{
+      index: roundIndex,
+      locked: false,
+      saving: false,
+      error: message,
+    }]).catch(err => {
+      console.error('Form live publish after background write failed:', err)
+    })
   }
 }
 
@@ -98,6 +126,8 @@ async function publishConfirmedRound(payload: Record<string, unknown>, values: s
       index: roundIndex,
       confirmed: true,
       locked: false,
+      saving: false,
+      error: '',
       deadlineAt: '',
       participants: String(payload.participants ?? ''),
       values,

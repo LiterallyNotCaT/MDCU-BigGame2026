@@ -32,6 +32,8 @@ export interface ScoringFormRound {
   participants: string
   confirmed: boolean
   locked: boolean
+  saving?: boolean
+  error?: string
   deadlineAt: string
 }
 
