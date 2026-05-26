@@ -61,7 +61,15 @@ async function publishConfirmedRound(payload: Record<string, unknown>) {
     const formKey = String(payload.formKey || '')
     const roundIndex = Number(payload.roundIndex)
     if (!formKey || !Number.isInteger(roundIndex) || roundIndex < 0) return
-    await publishFormRoundPatch(formKey, [{ index: roundIndex, confirmed: true, locked: false, deadlineAt: '' }])
+    const values = Array.isArray(payload.values) ? payload.values.map(value => String(value ?? '')) : []
+    await publishFormRoundPatch(formKey, [{
+      index: roundIndex,
+      confirmed: true,
+      locked: false,
+      deadlineAt: '',
+      participants: String(payload.participants ?? ''),
+      values,
+    }])
   } catch (error) {
     console.error('Form live publish after write failed:', error)
   }

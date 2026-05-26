@@ -5,6 +5,8 @@ export type FormLiveRound = {
   confirmed: boolean
   locked: boolean
   deadlineAt: string
+  participants: string
+  values: string[]
   updatedAt: string
 }
 
@@ -20,6 +22,8 @@ type RoundPatch = {
   confirmed?: boolean
   locked?: boolean
   deadlineAt?: string
+  participants?: string
+  values?: string[]
 }
 
 function formLiveKey(formKey: string) {
@@ -40,6 +44,8 @@ function normalizeLiveState(formKey: string, value: unknown): FormLiveState {
         confirmed: item.confirmed === true,
         locked: item.locked === true,
         deadlineAt: typeof item.deadlineAt === 'string' ? item.deadlineAt : '',
+        participants: typeof item.participants === 'string' ? item.participants : '',
+        values: Array.isArray(item.values) ? item.values.map(value => String(value ?? '')) : [],
         updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : '',
       }
       return next
@@ -68,12 +74,16 @@ export async function publishFormRoundPatch(formKey: string, patches: RoundPatch
       confirmed: false,
       locked: false,
       deadlineAt: '',
+      participants: '',
+      values: [],
       updatedAt: '',
     }
     rounds[String(patch.index)] = {
       confirmed: patch.confirmed === undefined ? previous.confirmed : patch.confirmed === true,
       locked: patch.locked === undefined ? previous.locked : patch.locked === true,
       deadlineAt: patch.deadlineAt === undefined ? previous.deadlineAt : String(patch.deadlineAt || ''),
+      participants: patch.participants === undefined ? previous.participants : String(patch.participants || ''),
+      values: patch.values === undefined ? previous.values : patch.values.map(value => String(value ?? '')),
       updatedAt: now,
     }
   }
@@ -94,13 +104,20 @@ export async function mergeFormLiveIntoState(state: ScoringFormState | null | un
     return state
   }
 
+  const liveValues = state.values.map((row, rowIndex) => row.map((cell, columnIndex) => {
+    const values = live.rounds[String(columnIndex)]?.values
+    return values && rowIndex < values.length ? values[rowIndex] : cell
+  }))
+
   return {
     ...state,
+    values: liveValues,
     rounds: state.rounds.map((round, index) => {
       const liveRound = live.rounds[String(index)]
       if (!liveRound) return round
       return {
         ...round,
+        participants: liveRound.participants || round.participants,
         confirmed: liveRound.confirmed === true,
         locked: liveRound.locked === true,
         deadlineAt: liveRound.deadlineAt || '',
@@ -167,6 +184,8 @@ export async function publishFullFormState(state: ScoringFormState | null | unde
       confirmed: round.confirmed === true,
       locked: round.locked === true,
       deadlineAt: round.deadlineAt || '',
+      participants: round.participants || '',
+      values: state.values.map(row => row[index] ?? ''),
     })),
   )
 }

@@ -46,6 +46,8 @@ type FormLiveState = {
     confirmed: boolean
     locked: boolean
     deadlineAt: string
+    participants: string
+    values: string[]
   }>
 }
 
@@ -311,6 +313,10 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
   const applyLiveState = useCallback((live: FormLiveState) => {
     if (!live?.formKey || !live.version || !live.rounds) return
     liveVersionByForm.current[live.formKey] = Math.max(liveVersionByForm.current[live.formKey] ?? 0, live.version)
+    const mergeValues = (values: ScoringFormState['values']) => values.map((row, rowIndex) => row.map((cell, columnIndex) => {
+      const liveValues = live.rounds[String(columnIndex)]?.values
+      return Array.isArray(liveValues) && rowIndex < liveValues.length ? liveValues[rowIndex] : cell
+    }))
     const mergeRounds = (rounds: ScoringFormState['rounds']) => rounds.map((round, index) => {
       const liveRound = live.rounds[String(index)]
       if (!liveRound) return round
@@ -318,9 +324,11 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
         round.confirmed === liveRound.confirmed
         && round.locked === liveRound.locked
         && (round.deadlineAt || '') === (liveRound.deadlineAt || '')
+        && (round.participants || '') === (liveRound.participants || round.participants || '')
       ) return round
       return {
         ...round,
+        participants: liveRound.participants || round.participants,
         confirmed: liveRound.confirmed === true,
         locked: liveRound.locked === true,
         deadlineAt: liveRound.deadlineAt || '',
@@ -329,16 +337,22 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
 
     setState(prev => {
       if (!prev || prev.form.formKey !== live.formKey) return prev
-      return { ...prev, rounds: mergeRounds(prev.rounds) }
+      return { ...prev, values: mergeValues(prev.values), rounds: mergeRounds(prev.rounds) }
     })
     setStatesByFormKey(prev => {
       const cached = prev[live.formKey]
       if (!cached) return prev
+      const nextState = { ...cached, values: mergeValues(cached.values), rounds: mergeRounds(cached.rounds) }
       return {
         ...prev,
-        [live.formKey]: { ...cached, rounds: mergeRounds(cached.rounds) },
+        [live.formKey]: nextState,
       }
     })
+    setDraft(prev => prev.map((row, rowIndex) => row.map((cell, columnIndex) => {
+      const liveValues = live.rounds[String(columnIndex)]?.values
+      return Array.isArray(liveValues) && rowIndex < liveValues.length ? liveValues[rowIndex] : cell
+    })))
+    setParticipantsByRound(prev => prev.map((value, index) => live.rounds[String(index)]?.participants || value))
   }, [])
 
   const refreshConfig = useCallback(async () => {
@@ -571,7 +585,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
   }, [canLoadSelectedForm, currentState?.form.formKey, formKey, refreshState])
 
   useEffect(() => {
-    const liveFormKey = currentForm && session && !isAdmin && canEditCurrentForm ? currentForm.formKey : ''
+    const liveFormKey = currentForm && canSeeContent ? currentForm.formKey : ''
     if (!liveFormKey) return
     let stopped = false
     let timer: number | undefined
@@ -605,7 +619,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
       stopped = true
       if (timer) window.clearTimeout(timer)
     }
-  }, [applyLiveState, canEditCurrentForm, currentForm, isAdmin, session])
+  }, [applyLiveState, canSeeContent, currentForm])
 
   const loginStaff = async () => {
     if (!currentForm || !passwordInput.trim()) return
