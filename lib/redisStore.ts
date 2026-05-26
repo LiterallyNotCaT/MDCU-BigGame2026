@@ -111,6 +111,19 @@ export async function redisSetJson(key: string, value: unknown) {
   }
 }
 
+export async function redisSetJsonWithTtl(key: string, value: unknown, ttlSeconds: number) {
+  const ttl = Math.max(1, Math.floor(ttlSeconds))
+  const restKv = getRestKvClient()
+  if (restKv) {
+    await restKv.set(key, value, { ex: ttl })
+    return
+  }
+
+  if (process.env.REDIS_URL) {
+    await redisUrlCommand(['SET', key, JSON.stringify(value), 'EX', String(ttl)])
+  }
+}
+
 export async function redisSetJsonIfNotExists(key: string, value: unknown, ttlSeconds: number) {
   const ttl = Math.max(30, Math.floor(ttlSeconds))
   const restKv = getRestKvClient()

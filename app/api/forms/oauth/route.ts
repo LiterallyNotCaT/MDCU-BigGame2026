@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server'
 import { auth, isAllowedDocChulaEmail } from '@/auth'
-import { callOAuthGas } from '@/lib/oauthGas'
-import type { OAuthFormProfile } from '@/lib/formPermissions'
+import { readOAuthProfile } from '@/lib/oauthProfile'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -15,11 +14,8 @@ export async function GET() {
   }
 
   try {
-    const data = await callOAuthGas<{ status: string; profile: OAuthFormProfile }>({
-      action: 'readOAuthLogin',
-      email,
-    })
-    return NextResponse.json({ ok: true, profile: data.profile })
+    const profile = await readOAuthProfile(email)
+    return NextResponse.json({ ok: true, profile })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     return NextResponse.json({ ok: false, message }, { status: 500 })

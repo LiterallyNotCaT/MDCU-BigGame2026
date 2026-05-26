@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server'
 import { auth, isAllowedDocChulaEmail } from '@/auth'
 import { publishFormRoundPatch } from '@/lib/formLive'
-import { isOAuthAdmin, type OAuthFormProfile } from '@/lib/formPermissions'
+import { isOAuthAdmin } from '@/lib/formPermissions'
 import { callGas } from '@/lib/gas'
-import { callOAuthGas } from '@/lib/oauthGas'
+import { readOAuthProfile } from '@/lib/oauthProfile'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -69,11 +69,8 @@ async function assertAdmin(payload: Record<string, unknown>) {
     if (!session?.user || !isAllowedDocChulaEmail(email)) {
       throw new Error('Unauthorized')
     }
-    const data = await callOAuthGas<{ status: string; profile: OAuthFormProfile }>({
-      action: 'readOAuthLogin',
-      email,
-    })
-    if (!isOAuthAdmin(data.profile)) throw new Error('Unauthorized')
+    const profile = await readOAuthProfile(email)
+    if (!isOAuthAdmin(profile)) throw new Error('Unauthorized')
     return
   }
 

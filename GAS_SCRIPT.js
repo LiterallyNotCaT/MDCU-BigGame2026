@@ -20,6 +20,13 @@ const FORM_SPREADSHEETS_BY_TAB = {
 }
 const EVENT_SPREADSHEET_ID = '17aDGTgeB1xIwXBPrbU0Fd5hXr3Qw_zSu1OZkas3EgZs'
 const EVENT_GID = 93487242
+const OAUTH_LOGIN_SHEET_ID = '105o7ABk2zn4ASM11wGjI3hw_UzT7NfRJlBzevJda1h0'
+const OAUTH_LOGIN_SHEET_NAMES = ['Log In', 'LogIn', 'Login', 'OAuth Login', 'OAuth Log In', 'Form Login']
+const OAUTH_LOGIN_DATA_START_ROW = 2
+const OAUTH_LOGIN_MAX_ROWS = 250
+const OAUTH_LOGIN_GAME_START_COL = 9
+const OAUTH_LOGIN_GAME_END_COL = 26
+const OAUTH_LOGIN_SCAN_ROWS = 20
 const WAVE_GIDS = {
   1: 1448591830,
 }
@@ -70,6 +77,18 @@ function doPost(e) {
       output.setContent(JSON.stringify(result))
     } else if (payload.action === 'setEventSolutionVisible') {
       const result = handleSetEventSolutionVisible(payload)
+      output.setContent(JSON.stringify(result))
+    } else if (payload.action === 'readOAuthLogin') {
+      const result = handleReadOAuthLogin(payload)
+      output.setContent(JSON.stringify(result))
+    } else if (payload.action === 'readFormStatesOAuth') {
+      const result = handleReadFormStatesOAuth(payload)
+      output.setContent(JSON.stringify(result))
+    } else if (payload.action === 'writeFormScoreOAuth') {
+      const result = handleWriteFormScoreOAuth(payload)
+      output.setContent(JSON.stringify(result))
+    } else if (payload.action === 'setFormRoundControlOAuth') {
+      const result = handleSetFormRoundControlOAuth(payload)
       output.setContent(JSON.stringify(result))
     } else if (payload.action === 'writeChat') {
       const result = handleWriteChat(payload)
@@ -855,9 +874,12 @@ function handleWriteFormScore(payload) {
   const auth = validateFormAuth_(form, payload)
   if (!auth.ok) return { status: 'error', message: auth.message || 'Unauthorized' }
 
+  return writeFormScoreForUser_(form, payload, auth.username)
+}
+
+function writeFormScoreForUser_(form, payload, username) {
   const roundIndex = Number(payload.roundIndex)
   if (!Number.isInteger(roundIndex) || roundIndex < 0) return { status: 'error', message: 'Invalid round' }
-  const isAdmin = auth.role === 'admin'
   const sheet = openFormSheet_(form)
   let lock = null
   try {
@@ -888,7 +910,7 @@ function handleWriteFormScore(payload) {
       ...(control.rounds[String(roundIndex)] || {}),
       confirmed: true,
       locked: false,
-      confirmedBy: auth.username,
+      confirmedBy: username || 'Unknown',
       confirmedAt: now.toISOString(),
     }
     writeFormControl_(form.formKey, control)
@@ -911,6 +933,11 @@ function handleSetFormRoundControl(payload) {
   if (!form) return { status: 'error', message: 'Form not found' }
   const password = String(payload.password || '')
   if (!password || password !== getAdminPassword_()) return { status: 'error', message: 'Wrong admin password' }
+
+  return updateFormRoundControl_(form, payload)
+}
+
+function updateFormRoundControl_(form, payload) {
   const roundIndex = Number(payload.roundIndex)
   const allRounds = payload.allRounds === true
   if (!allRounds && (!Number.isInteger(roundIndex) || roundIndex < 0)) return { status: 'error', message: 'Invalid round' }
@@ -951,6 +978,245 @@ function handleSetFormRoundControl(payload) {
   } finally {
     releaseNamedLock_(lock)
   }
+}
+
+function getOAuthLoginSheet_() {
+  const spreadsheets = []
+  try {
+    const active = SpreadsheetApp.getActiveSpreadsheet()
+    if (active) spreadsheets.push(active)
+  } catch (err) {
+    // Standalone deployments may not have an active spreadsheet.
+  }
+  if (OAUTH_LOGIN_SHEET_ID) {
+    try {
+      const configured = SpreadsheetApp.openById(OAUTH_LOGIN_SHEET_ID)
+      if (configured && !spreadsheets.some(ss => ss.getId && ss.getId() === configured.getId())) {
+        spreadsheets.push(configured)
+      }
+    } catch (err) {
+      // Keep trying any active spreadsheet if available.
+    }
+  }
+  if (!spreadsheets.length) {
+    throw new Error('OAuth login spreadsheet not found. Share the login sheet with the deployed Apps Script account.')
+  }
+
+  const normalizedNames = OAUTH_LOGIN_SHEET_NAMES.map(name => normalizeSheetName_(name))
+  const tried = []
+  for (const ss of spreadsheets) {
+    for (const sheet of ss.getSheets()) {
+      tried.push(`${ss.getName()}/${sheet.getName()}`)
+      if (normalizedNames.indexOf(normalizeSheetName_(sheet.getName())) >= 0) return sheet
+    }
+
+    const tableSheet = ss.getSheets().find(sheet => looksLikeOAuthLoginSheet_(sheet))
+    if (tableSheet) return tableSheet
+
+    const sheets = ss.getSheets()
+    if (sheets.length === 1) return sheets[0]
+  }
+
+  throw new Error(`OAuth login table not found. Checked tabs: ${tried.join(', ')}`)
+}
+
+function normalizeSheetName_(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+function looksLikeOAuthLoginSheet_(sheet) {
+  try {
+    return Boolean(detectOAuthLoginLayout_(sheet))
+  } catch (err) {
+    return false
+  }
+}
+
+function normalizeHeaderCell_(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+function isOAuthRoleHeader_(value) {
+  const normalized = normalizeHeaderCell_(value)
+  return normalized === 'webrole' || normalized === 'role' || normalized.indexOf('role') >= 0
+}
+
+function detectOAuthLoginLayout_(sheet) {
+  const lastCol = Math.max(OAUTH_LOGIN_GAME_END_COL, Math.min(sheet.getLastColumn(), 40), 8)
+  const scanRows = Math.max(1, Math.min(OAUTH_LOGIN_SCAN_ROWS, sheet.getLastRow() || OAUTH_LOGIN_SCAN_ROWS))
+  const values = sheet.getRange(1, 1, scanRows, lastCol).getDisplayValues()
+
+  for (let rowIndex = 0; rowIndex < values.length; rowIndex++) {
+    const row = values[rowIndex]
+    let roleCol = -1
+    for (let col = 0; col < row.length; col++) {
+      if (isOAuthRoleHeader_(row[col])) {
+        roleCol = col
+        break
+      }
+    }
+    if (roleCol < 0) continue
+
+    const gameStartCol = Math.max(roleCol + 1, OAUTH_LOGIN_GAME_START_COL - 1)
+    const gameHeaders = row.slice(gameStartCol, Math.min(row.length, OAUTH_LOGIN_GAME_END_COL))
+      .map(value => String(value || '').trim())
+      .filter(Boolean)
+    if (!gameHeaders.length) continue
+
+    return {
+      headerRow: rowIndex + 1,
+      dataStartRow: rowIndex + 2,
+      roleCol: roleCol + 1,
+      gameStartCol: gameStartCol + 1,
+      gameEndCol: Math.min(row.length, OAUTH_LOGIN_GAME_END_COL),
+    }
+  }
+
+  return null
+}
+
+function normalizeOAuthEmail_(value) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function normalizeOAuthGameKey_(value) {
+  return String(value || '')
+    .trim()
+    .replace(/\s+[AB]$/i, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+}
+
+function normalizeOAuthRole_(value) {
+  const raw = String(value || '').trim()
+  const compact = raw.toLowerCase().replace(/\s+/g, ' ')
+  if (compact === 'admin') return 'ADMIN'
+  if (compact === 'head/prasarn') return 'Head/Prasarn'
+  if (compact === 'core team') return 'Core Team'
+  if (compact === 'staff') return 'Staff'
+  if (compact === 'banned') return 'Banned'
+  return 'Viewer'
+}
+
+function isTruthyOAuthCell_(value) {
+  return value === true || String(value || '').trim().toUpperCase() === 'TRUE'
+}
+
+function readOAuthProfile_(email) {
+  const targetEmail = normalizeOAuthEmail_(email)
+  if (!targetEmail) throw new Error('Missing OAuth email')
+
+  const sheet = getOAuthLoginSheet_()
+  const layout = detectOAuthLoginLayout_(sheet) || {
+    headerRow: 1,
+    dataStartRow: OAUTH_LOGIN_DATA_START_ROW,
+    roleCol: 8,
+    gameStartCol: OAUTH_LOGIN_GAME_START_COL,
+    gameEndCol: OAUTH_LOGIN_GAME_END_COL,
+  }
+  const width = Math.max(layout.gameEndCol, layout.roleCol, OAUTH_LOGIN_GAME_END_COL)
+  const gameHeaders = sheet
+    .getRange(layout.headerRow, layout.gameStartCol, 1, layout.gameEndCol - layout.gameStartCol + 1)
+    .getDisplayValues()[0]
+  const maxRows = Math.max(1, Math.min(OAUTH_LOGIN_MAX_ROWS, Math.max(sheet.getLastRow() - layout.dataStartRow + 1, 1)))
+  const rows = sheet
+    .getRange(layout.dataStartRow, 1, maxRows, width)
+    .getValues()
+
+  const row = rows.find(item => normalizeOAuthEmail_(item[0]) === targetEmail)
+  if (!row) {
+    return {
+      email: targetEmail,
+      nickname: '',
+      name: '',
+      job: '',
+      role: 'Viewer',
+      editableGames: [],
+      gameKeys: [],
+      isAdmin: false,
+    }
+  }
+
+  const role = normalizeOAuthRole_(row[layout.roleCol - 1])
+  const editableGames = []
+  const gameKeys = []
+  gameHeaders.forEach((header, index) => {
+    if (!header || !isTruthyOAuthCell_(row[layout.gameStartCol - 1 + index])) return
+    editableGames.push(String(header).trim())
+    gameKeys.push(normalizeOAuthGameKey_(header))
+  })
+
+  return {
+    email: targetEmail,
+    nickname: String(row[1] || '').trim(),
+    name: String(row[2] || '').trim(),
+    job: String(row[6] || '').trim(),
+    role,
+    editableGames,
+    gameKeys,
+    isAdmin: role === 'ADMIN',
+  }
+}
+
+function oauthCanEditForm_(profile, form) {
+  if (!profile || !form || form.blank || profile.role === 'Banned') return false
+  if (profile.isAdmin) return true
+  return profile.gameKeys.indexOf(normalizeOAuthGameKey_(form.user)) !== -1
+}
+
+function oauthCanViewForm_(profile, form) {
+  if (!profile || !form || form.blank || profile.role === 'Banned') return false
+  if (profile.isAdmin || profile.role === 'Head/Prasarn' || profile.role === 'Core Team') return true
+  if (profile.role === 'Staff') return oauthCanEditForm_(profile, form)
+  return false
+}
+
+function handleReadOAuthLogin(payload) {
+  return { status: 'ok', profile: readOAuthProfile_(payload.email) }
+}
+
+function handleReadFormStatesOAuth(payload) {
+  const profile = readOAuthProfile_(payload.email)
+  const requested = Array.isArray(payload.formKeys)
+    ? payload.formKeys.reduce((set, key) => {
+      if (key) set[String(key)] = true
+      return set
+    }, {})
+    : null
+  const forms = readFormConfigs_(false)
+  const states = {}
+  const errors = {}
+
+  forms.forEach(form => {
+    if (requested && !requested[form.formKey]) return
+    if (!oauthCanViewForm_(profile, form)) return
+    try {
+      states[form.formKey] = readFormState_(form)
+    } catch (err) {
+      errors[form.formKey] = String(err && err.message ? err.message : err)
+    }
+  })
+
+  return { status: 'ok', profile, states, errors }
+}
+
+function handleWriteFormScoreOAuth(payload) {
+  const form = findFormConfig_(payload.formKey, false)
+  if (!form) return { status: 'error', message: 'Form not found' }
+
+  const profile = readOAuthProfile_(payload.email)
+  if (!oauthCanEditForm_(profile, form)) return { status: 'error', message: 'This form is view-only for your account' }
+
+  return writeFormScoreForUser_(form, payload, profile.nickname || profile.email || 'OAuth user')
+}
+
+function handleSetFormRoundControlOAuth(payload) {
+  const profile = readOAuthProfile_(payload.email)
+  if (!profile.isAdmin) return { status: 'error', message: 'Admin role required' }
+
+  const form = findFormConfig_(payload.formKey, false)
+  if (!form) return { status: 'error', message: 'Form not found' }
+  return updateFormRoundControl_(form, payload)
 }
 
 function eventWaveConfig_(wave) {

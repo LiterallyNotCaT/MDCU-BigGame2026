@@ -3,7 +3,6 @@ import { auth, isAllowedDocChulaEmail } from '@/auth'
 import { canOAuthViewForm, type OAuthFormProfile } from '@/lib/formPermissions'
 import { mergeFormLiveIntoStates } from '@/lib/formLive'
 import { callGas } from '@/lib/gas'
-import { callOAuthGas } from '@/lib/oauthGas'
 import type { ScoringFormState } from '@/lib/forms'
 
 export const runtime = 'nodejs'
@@ -25,13 +24,10 @@ export async function POST(req: Request) {
       if (!session?.user || !isAllowedDocChulaEmail(email)) {
         return NextResponse.json({ ok: false, message: 'Unauthorized', states: {} }, { status: 401 })
       }
-      const profileData = await callOAuthGas<{ status: string; profile: OAuthFormProfile }>({
-        action: 'readOAuthLogin',
-        email,
-      })
       const requestedKeys = Array.isArray(payload.formKeys) ? payload.formKeys.filter(Boolean) : []
-      const data = await callOAuthGas<{
+      const data = await callGas<{
         status: string
+        profile: OAuthFormProfile
         states: Record<string, ScoringFormState>
         errors?: Record<string, string>
       }>({
@@ -40,7 +36,7 @@ export async function POST(req: Request) {
         formKeys: requestedKeys,
       })
       const visibleStates = Object.fromEntries(
-        Object.entries(data.states ?? {}).filter(([, state]) => canOAuthViewForm(profileData.profile, state.form)),
+        Object.entries(data.states ?? {}).filter(([, state]) => canOAuthViewForm(data.profile, state.form)),
       )
       const states = await mergeFormLiveIntoStates(visibleStates)
       return NextResponse.json({ ok: true, states, errors: data.errors ?? {} })
