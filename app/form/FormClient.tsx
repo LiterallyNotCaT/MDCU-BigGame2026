@@ -32,6 +32,13 @@ type Session = {
   authMode?: 'password' | 'oauth'
 }
 
+type BulkControlKind = 'edit' | 'unlock'
+type BulkControlScope = 'form' | 'tab' | 'all'
+type BulkControlTarget = {
+  formKey: string
+  roundCount: number
+}
+
 type FormLiveState = {
   formKey: string
   version: number
@@ -124,6 +131,18 @@ function normalizeScoreText(value: string, allowNegative: boolean) {
   if (!pattern.test(compact)) return ''
   const number = Number(compact)
   return Number.isSafeInteger(number) ? String(number) : ''
+}
+
+function applyRoundControlPatch(round: ScoringFormState['rounds'][number], patch: Record<string, unknown>) {
+  const next = { ...round }
+  if (patch.locked !== undefined) next.locked = patch.locked === true
+  if (patch.confirmed !== undefined) next.confirmed = patch.confirmed === true
+  if (patch.deadlineMinutes !== undefined) {
+    const minutes = Math.max(1, Math.min(240, Number(patch.deadlineMinutes) || 10))
+    next.deadlineAt = new Date(Date.now() + minutes * 60000).toISOString()
+  }
+  if (patch.clearDeadline === true) next.deadlineAt = ''
+  return next
 }
 
 function roundDisplayMeta(state: ScoringFormState, round: { label: string; wave: string }, index: number) {
@@ -240,6 +259,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
   const [stateLoadError, setStateLoadError] = useState('')
   const [savingRound, setSavingRound] = useState<number | null>(null)
   const [controlBusy, setControlBusy] = useState(false)
+  const [bulkControl, setBulkControl] = useState<{ kind: BulkControlKind } | null>(null)
   const [notice, setNotice] = useState<{ type: 'ok' | 'err' | 'warn'; text: string } | null>(null)
   const [oauthProfile, setOauthProfile] = useState<OAuthFormProfile | null>(null)
   const [oauthLoading, setOauthLoading] = useState(true)
@@ -381,6 +401,60 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     setStatesByFormKey(prev => ({ ...prev, ...nextStates }))
     return nextStates
   }, [formKeysForTab])
+
+  const roundCountForForm = useCallback((form: ScoringFormConfig) => {
+    const cached = statesByFormKey[form.formKey]
+    const count = cached?.form.maxRounds
+      || cached?.rounds.length
+      || form.maxRounds
+      || (form.kind === 'score-number' || form.kind === 'score-unsigned' ? 4 : 0)
+      || (form.kind === 'match-single' ? 6 : 0)
+      || 12
+    return Math.max(1, Math.min(24, Math.floor(count)))
+  }, [statesByFormKey])
+
+  const bulkTargetsForScope = useCallback((scope: BulkControlScope): BulkControlTarget[] => {
+    const source = scope === 'all'
+      ? forms
+      : scope === 'tab'
+        ? currentForms
+        : currentForm
+          ? [currentForm]
+          : []
+    return source
+      .filter(form => !form.blank)
+      .map(form => ({
+        formKey: form.formKey,
+        roundCount: roundCountForForm(form),
+      }))
+  }, [currentForm, currentForms, forms, roundCountForForm])
+
+  const applyControlPatchLocally = useCallback((targets: BulkControlTarget[], patch: Record<string, unknown>) => {
+    const targetMap = new Map(targets.map(target => [target.formKey, target.roundCount]))
+    const patchState = (item: ScoringFormState) => {
+      const roundCount = targetMap.get(item.form.formKey)
+      if (!roundCount) return item
+      return {
+        ...item,
+        rounds: item.rounds.map((round, index) => (
+          index < roundCount ? applyRoundControlPatch(round, patch) : round
+        )),
+      }
+    }
+
+    setState(prev => prev && targetMap.has(prev.form.formKey) ? patchState(prev) : prev)
+    setStatesByFormKey(prev => {
+      let changed = false
+      const next = { ...prev }
+      for (const formKeyItem of targetMap.keys()) {
+        const cached = next[formKeyItem]
+        if (!cached) continue
+        next[formKeyItem] = patchState(cached)
+        changed = true
+      }
+      return changed ? next : prev
+    })
+  }, [])
 
   useEffect(() => {
     const stored = readStoredFormSession()
@@ -714,18 +788,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
         if (!prev || prev.form.formKey !== currentState.form.formKey) return prev
         return {
           ...prev,
-          rounds: prev.rounds.map((round, index) => {
-            if (index !== roundIndex) return round
-            const next = { ...round }
-            if (patch.locked !== undefined) next.locked = patch.locked === true
-            if (patch.confirmed !== undefined) next.confirmed = patch.confirmed === true
-            if (patch.deadlineMinutes !== undefined) {
-              const minutes = Math.max(1, Math.min(240, Number(patch.deadlineMinutes) || 10))
-              next.deadlineAt = new Date(Date.now() + minutes * 60000).toISOString()
-            }
-            if (patch.clearDeadline === true) next.deadlineAt = ''
-            return next
-          }),
+          rounds: prev.rounds.map((round, index) => index === roundIndex ? applyRoundControlPatch(round, patch) : round),
         }
       })
       setStatesByFormKey(prev => {
@@ -735,18 +798,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
           ...prev,
           [currentState.form.formKey]: {
             ...cached,
-            rounds: cached.rounds.map((round, index) => {
-              if (index !== roundIndex) return round
-              const next = { ...round }
-              if (patch.locked !== undefined) next.locked = patch.locked === true
-              if (patch.confirmed !== undefined) next.confirmed = patch.confirmed === true
-              if (patch.deadlineMinutes !== undefined) {
-                const minutes = Math.max(1, Math.min(240, Number(patch.deadlineMinutes) || 10))
-                next.deadlineAt = new Date(Date.now() + minutes * 60000).toISOString()
-              }
-              if (patch.clearDeadline === true) next.deadlineAt = ''
-              return next
-            }),
+            rounds: cached.rounds.map((round, index) => index === roundIndex ? applyRoundControlPatch(round, patch) : round),
           },
         }
       })
@@ -780,53 +832,37 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     })
   }, [forms.length, loadStatesForTab, oauthProfile, tab])
 
-  const allowAllEditAgain = async () => {
+  const openBulkControl = (kind: BulkControlKind) => {
     if (!currentState || (!adminSession && !oauthIsAdmin)) return
-    if (!window.confirm('Allow every round in this table to be edited and submitted again?')) return
+    setBulkControl({ kind })
+  }
+
+  const runBulkControl = async (kind: BulkControlKind, scope: BulkControlScope) => {
+    if (!currentState || (!adminSession && !oauthIsAdmin)) return
+    const targets = bulkTargetsForScope(scope)
+    if (!targets.length) {
+      notify('warn', 'No form rounds found for this scope')
+      return
+    }
+    const patch = kind === 'edit'
+      ? { confirmed: false, locked: false, clearDeadline: true }
+      : { locked: false, clearDeadline: true }
     setControlBusy(true)
     try {
       const useOAuthControl = oauthIsAdmin && !adminSession
-      const response = await fetchJson<{
-        data?: { state?: ScoringFormState }
-        state?: ScoringFormState
-      }>('/api/forms/control', {
+      await fetchJson('/api/forms/control', {
         method: 'POST',
         body: JSON.stringify({
-          formKey: currentState.form.formKey,
           password: adminSession?.password ?? '',
           oauth: useOAuthControl,
           allRounds: true,
-          roundCount: currentState.rounds.length,
-          confirmed: false,
-          locked: false,
-          clearDeadline: true,
+          targets,
+          ...patch,
         }),
       })
-      const returnedState = response.data?.state ?? response.state
-      if (returnedState) {
-        applyFormState(returnedState)
-        setStatesByFormKey(prev => ({ ...prev, [returnedState.form.formKey]: returnedState }))
-      } else {
-        setState(prev => {
-          if (!prev || prev.form.formKey !== currentState.form.formKey) return prev
-          return {
-            ...prev,
-            rounds: prev.rounds.map(round => ({ ...round, confirmed: false, locked: false, deadlineAt: '' })),
-          }
-        })
-        setStatesByFormKey(prev => {
-          const cached = prev[currentState.form.formKey]
-          if (!cached) return prev
-          return {
-            ...prev,
-            [currentState.form.formKey]: {
-              ...cached,
-              rounds: cached.rounds.map(round => ({ ...round, confirmed: false, locked: false, deadlineAt: '' })),
-            },
-          }
-        })
-      }
-      notify('ok', 'All rounds can be edited again')
+      applyControlPatchLocally(targets, patch)
+      setBulkControl(null)
+      notify('ok', kind === 'edit' ? 'Selected rounds can be edited again' : 'Selected rounds are unlocked')
     } catch (error) {
       notify('err', error instanceof Error ? error.message : String(error))
     } finally {
@@ -1042,11 +1078,14 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
                         {selectedRoundMeta.locked ? <Unlock size={13} /> : <Lock size={13} />}
                         {selectedRoundMeta.locked ? 'Unlock' : 'Lock'}
                       </button>
-                      <button type="button" disabled={controlBusy} onClick={() => setRoundControl(selectedRound, { confirmed: false, locked: false })} className="btn btn-ghost">
+                      <button type="button" disabled={controlBusy} onClick={() => setRoundControl(selectedRound, { confirmed: false, locked: false, clearDeadline: true })} className="btn btn-ghost">
                         Edit again
                       </button>
-                      <button type="button" disabled={controlBusy} onClick={allowAllEditAgain} className="btn btn-ghost">
+                      <button type="button" disabled={controlBusy} onClick={() => openBulkControl('edit')} className="btn btn-ghost">
                         Allow all edit again
+                      </button>
+                      <button type="button" disabled={controlBusy} onClick={() => openBulkControl('unlock')} className="btn btn-ghost">
+                        Unlock all
                       </button>
                     </div>
                   )}
@@ -1148,6 +1187,36 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
               </div>
             )}
           </section>
+
+          {bulkControl && (
+            <div className="form-control-dialog-backdrop" role="presentation" onClick={() => !controlBusy && setBulkControl(null)}>
+              <div className="form-control-dialog" role="dialog" aria-modal="true" aria-labelledby="form-control-dialog-title" onClick={event => event.stopPropagation()}>
+                <div>
+                  <h2 id="form-control-dialog-title">
+                    {bulkControl.kind === 'edit' ? 'Allow edit again' : 'Unlock all'}
+                  </h2>
+                  <p>Choose how wide this admin action should apply.</p>
+                </div>
+                <div className="form-control-dialog-options">
+                  <button type="button" disabled={controlBusy} onClick={() => runBulkControl(bulkControl.kind, 'form')}>
+                    <strong>This subtab only</strong>
+                    <span>All columns in {currentForm?.user ?? 'this form'}</span>
+                  </button>
+                  <button type="button" disabled={controlBusy} onClick={() => runBulkControl(bulkControl.kind, 'tab')}>
+                    <strong>All subtabs in this tab</strong>
+                    <span>{tab}</span>
+                  </button>
+                  <button type="button" disabled={controlBusy} onClick={() => runBulkControl(bulkControl.kind, 'all')}>
+                    <strong>All tabs</strong>
+                    <span>Every loaded scoring form</span>
+                  </button>
+                </div>
+                <button type="button" className="btn btn-ghost" disabled={controlBusy} onClick={() => setBulkControl(null)}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
 
           <ContactFooter className="form-footer" />
         </div>

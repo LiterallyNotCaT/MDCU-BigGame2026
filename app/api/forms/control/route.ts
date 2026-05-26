@@ -1,13 +1,24 @@
 import { NextResponse } from 'next/server'
 import { auth, isAllowedDocChulaEmail } from '@/auth'
-import { mergeFormLiveIntoState, publishFormRoundPatch, publishFullFormState } from '@/lib/formLive'
+import { publishFormRoundPatch } from '@/lib/formLive'
+import { isOAuthAdmin, type OAuthFormProfile } from '@/lib/formPermissions'
 import { callGas } from '@/lib/gas'
 import { callOAuthGas } from '@/lib/oauthGas'
-import type { ScoringFormState } from '@/lib/forms'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-export const maxDuration = 30
+export const maxDuration = 20
+
+type ControlTarget = {
+  formKey?: unknown
+  roundCount?: unknown
+}
+
+type ControlPatch = {
+  confirmed?: boolean
+  locked?: boolean
+  deadlineAt?: string
+}
 
 export async function POST(req: Request) {
   let payload: Record<string, unknown>
@@ -18,158 +29,92 @@ export async function POST(req: Request) {
   }
 
   try {
-    if (payload.oauth === true) {
-      const session = await auth()
-      const email = session?.user?.email ?? ''
-      if (!session?.user || !isAllowedDocChulaEmail(email)) {
-        return NextResponse.json({ ok: false, message: 'Unauthorized' }, { status: 401 })
-      }
-      if (payload.allRounds === true) {
-      const data = await runLegacyCompatibleBulkControl(payload, true, email)
-        await publishControlChange(payload, data)
-        return NextResponse.json({ ok: true, message: data.message || 'Updated', data })
-      }
-      const data = await callOAuthGas({
-        ...payload,
-        email,
-        action: 'setFormRoundControlOAuth',
-      })
-      await publishControlChange(payload, data)
-      return NextResponse.json({ ok: true, message: data.message || 'Updated', data })
+    await assertAdmin(payload)
+
+    const patch = controlPatchFromPayload(payload)
+    if (!patch) {
+      return NextResponse.json({ ok: false, message: 'No control change supplied' }, { status: 400 })
     }
 
-    if (payload.allRounds === true) {
-      const data = await runLegacyCompatibleBulkControl(payload, false)
-      await publishControlChange(payload, data)
-      return NextResponse.json({ ok: true, message: data.message || 'Updated', data })
+    const targets = controlTargetsFromPayload(payload)
+    if (!targets.length) {
+      return NextResponse.json({ ok: false, message: 'Invalid round' }, { status: 400 })
     }
 
-    const data = await callGas({
-      ...payload,
-      action: 'setFormRoundControl',
+    await Promise.all(targets.map(target => publishFormRoundPatch(
+      target.formKey,
+      target.rounds.map(index => ({ index, ...patch })),
+    )))
+
+    return NextResponse.json({
+      ok: true,
+      message: 'Updated',
+      data: {
+        patch,
+        targets,
+      },
+    }, {
+      headers: { 'Cache-Control': 'no-store' },
     })
-    await publishControlChange(payload, data)
-    return NextResponse.json({ ok: true, message: data.message || 'Updated', data })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    return NextResponse.json({ ok: false, message }, { status: /busy|lock|timeout/i.test(message) ? 503 : 400 })
+    return NextResponse.json({ ok: false, message }, { status: /unauthorized/i.test(message) ? 401 : 400 })
   }
 }
 
-async function runLegacyCompatibleBulkControl(payload: Record<string, unknown>, oauth: boolean, email = '') {
-  const formKey = String(payload.formKey || '')
-  const roundCount = Math.max(1, Math.min(24, Math.floor(Number(payload.roundCount) || 0)))
-  if (!formKey || !roundCount) throw new Error('Invalid round')
-
-  const controlPayload = {
-    formKey,
-    password: payload.password ?? '',
-    confirmed: payload.confirmed,
-    locked: payload.locked,
-    clearDeadline: payload.clearDeadline,
-    deadlineMinutes: payload.deadlineMinutes,
-  }
-
-  for (let roundIndex = 0; roundIndex < roundCount; roundIndex++) {
-    if (oauth) {
-      await callOAuthGas({
-        ...controlPayload,
-        email,
-        roundIndex,
-        action: 'setFormRoundControlOAuth',
-      })
-    } else {
-      await callGas({
-        ...controlPayload,
-        roundIndex,
-        action: 'setFormRoundControl',
-      })
+async function assertAdmin(payload: Record<string, unknown>) {
+  if (payload.oauth === true) {
+    const session = await auth()
+    const email = session?.user?.email ?? ''
+    if (!session?.user || !isAllowedDocChulaEmail(email)) {
+      throw new Error('Unauthorized')
     }
+    const data = await callOAuthGas<{ status: string; profile: OAuthFormProfile }>({
+      action: 'readOAuthLogin',
+      email,
+    })
+    if (!isOAuthAdmin(data.profile)) throw new Error('Unauthorized')
+    return
   }
 
-  const state = await readStateAfterControl(formKey, oauth, email)
-  return {
-    status: 'ok',
-    message: 'All form rounds are editable again',
-    state: applyControlPayloadToState(state, payload),
-  }
-}
-
-function applyControlPayloadToState(state: ScoringFormState | null | undefined, payload: Record<string, unknown>) {
-  if (!state) return state
-  const patch = controlPatchFromPayload(payload)
-  if (!patch) return state
-  const applyPatch = (round: ScoringFormState['rounds'][number]) => ({
-    ...round,
-    confirmed: patch.confirmed === undefined ? round.confirmed : patch.confirmed,
-    locked: patch.locked === undefined ? round.locked : patch.locked,
-    deadlineAt: patch.deadlineAt === undefined ? round.deadlineAt : patch.deadlineAt,
+  await callGas({
+    action: 'authFormUser',
+    admin: true,
+    password: String(payload.password ?? ''),
   })
-  if (payload.allRounds === true) {
-    return { ...state, rounds: state.rounds.map(applyPatch) }
-  }
-  const roundIndex = Number(payload.roundIndex)
-  if (!Number.isInteger(roundIndex) || roundIndex < 0) return state
-  return {
-    ...state,
-    rounds: state.rounds.map((round, index) => index === roundIndex ? applyPatch(round) : round),
-  }
 }
 
-async function readStateAfterControl(formKey: string, oauth: boolean, email = '') {
-  if (oauth) {
-    try {
-      const data = await callOAuthGas<{
-        status: string
-        states: Record<string, ScoringFormState>
-      }>({
-        action: 'readFormStatesOAuth',
-        email,
-        formKeys: [formKey],
-      })
-      const state = data.states?.[formKey]
-      if (state) return await mergeFormLiveIntoState(state)
-    } catch {
-      // Fall back to the main form reader below.
-    }
-  }
+function controlTargetsFromPayload(payload: Record<string, unknown>) {
+  const rawTargets = Array.isArray(payload.targets) ? payload.targets as ControlTarget[] : []
+  const targets = rawTargets.length
+    ? rawTargets
+    : [{
+      formKey: payload.formKey,
+      roundCount: payload.roundCount,
+    }]
 
-  const stateData = await callGas<{ status: string; state: ScoringFormState }>({
-    action: 'readFormState',
-    formKey,
-  })
-  return await mergeFormLiveIntoState(stateData.state)
-}
+  return targets.flatMap(target => {
+    const formKey = String(target.formKey ?? '').trim()
+    if (!formKey) return []
 
-async function publishControlChange(payload: Record<string, unknown>, data: Record<string, unknown>) {
-  try {
-    const formKey = String(payload.formKey || '')
-    const patch = controlPatchFromPayload(payload)
-    if (formKey && patch) {
-      if (payload.allRounds === true) {
-        const roundCount = Math.max(1, Math.min(24, Math.floor(Number(payload.roundCount) || 0)))
-        await publishFormRoundPatch(
-          formKey,
-          Array.from({ length: roundCount }, (_, index) => ({ index, ...patch })),
-        )
-        return
-      }
-
+    const allRounds = payload.allRounds === true || rawTargets.length > 0
+    if (!allRounds) {
       const roundIndex = Number(payload.roundIndex)
-      if (!Number.isInteger(roundIndex) || roundIndex < 0) return
-      await publishFormRoundPatch(formKey, [{ index: roundIndex, ...patch }])
-      return
+      if (!Number.isInteger(roundIndex) || roundIndex < 0) return []
+      return [{ formKey, rounds: [roundIndex] }]
     }
 
-    const returnedState = data.state as ScoringFormState | undefined
-    if (returnedState?.form?.formKey) await publishFullFormState(returnedState)
-  } catch (error) {
-    console.error('Form live publish after control failed:', error)
-  }
+    const roundCount = Math.max(1, Math.min(24, Math.floor(Number(target.roundCount) || 0)))
+    if (!roundCount) return []
+    return [{
+      formKey,
+      rounds: Array.from({ length: roundCount }, (_, index) => index),
+    }]
+  })
 }
 
-function controlPatchFromPayload(payload: Record<string, unknown>) {
-  const patch: { confirmed?: boolean; locked?: boolean; deadlineAt?: string } = {}
+function controlPatchFromPayload(payload: Record<string, unknown>): ControlPatch | null {
+  const patch: ControlPatch = {}
   if (payload.confirmed !== undefined) patch.confirmed = payload.confirmed === true
   if (payload.locked !== undefined) patch.locked = payload.locked === true
   if (payload.clearDeadline === true) patch.deadlineAt = ''

@@ -4343,7 +4343,9 @@ form .btn.w-full {
 }
 .form-settings-row.manual-only {
   display: flex;
-  justify-content: flex-end;
+  justify-content: flex-start;
+  margin: 4px 0 10px;
+  min-height: 0;
 }
 .form-settings-row label {
   display: grid;
@@ -4380,12 +4382,77 @@ form .btn.w-full {
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
-  justify-content: flex-end;
+  justify-content: flex-start;
 }
 .form-admin-controls .btn {
   min-height: 36px;
   padding: 8px 10px;
   font-size: 0.74rem;
+}
+.form-control-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(15, 23, 42, 0.38);
+  backdrop-filter: blur(6px);
+}
+.form-control-dialog {
+  width: min(100%, 520px);
+  display: grid;
+  gap: 14px;
+  border: 1px solid #cbd8ea;
+  border-radius: 18px;
+  background: #fff;
+  padding: 18px;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.22);
+}
+.form-control-dialog h2 {
+  margin: 0;
+  color: #0f172a;
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 1000;
+}
+.form-control-dialog p {
+  margin: 3px 0 0;
+  color: #64748b;
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+.form-control-dialog-options {
+  display: grid;
+  gap: 9px;
+}
+.form-control-dialog-options button {
+  display: grid;
+  gap: 3px;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  background: #f8fbff;
+  padding: 12px 13px;
+  text-align: left;
+  color: #1e3a8a;
+}
+.form-control-dialog-options button:hover:not(:disabled) {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+.form-control-dialog-options button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+.form-control-dialog-options strong {
+  color: #0f172a;
+  font-size: 0.94rem;
+  font-weight: 1000;
+}
+.form-control-dialog-options span {
+  color: #64748b;
+  font-size: 0.8rem;
+  font-weight: 800;
 }
 .form-table-wrap {
   width: 100%;
