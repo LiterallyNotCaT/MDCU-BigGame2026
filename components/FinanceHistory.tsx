@@ -10,10 +10,17 @@ import { X } from 'lucide-react'
 
 type HistoryType = 'income' | 'bet' | 'reward' | 'lose' | 'start' | 'disaster'
 
+interface HistoryDetailLine {
+  area?: string
+  text: string
+  deleted?: boolean
+}
+
 interface HistoryEntry {
   wave?: number
   label: string
   detail?: string
+  detailLines?: HistoryDetailLine[]
   detailItems?: string[]
   amount: number
   type: HistoryType
@@ -186,11 +193,23 @@ const disownedGroupFromRows = (rows: any[]) => {
   return String(row20?.[14]?.v ?? row20?.[15]?.v ?? row20?.[405]?.v ?? '').trim()
 }
 
+const bonusIslandFromRows = (rows: any[]) => {
+  const row20 = rows?.[19]?.c ?? []
+  return String(cellValue(row20?.[14]) ?? '').trim()
+}
+
 const fetchDisownedGroup = async (wave: number, rows: any[]) => {
   const fromVisibleColumns = disownedGroupFromRows(rows)
   if (fromVisibleColumns) return fromVisibleColumns
   const opRows = await fetchSheetRows(`${getWaveSheetQuery(wave)}&range=${encodeURIComponent('OP20:OP20')}`)
   return String(opRows?.[0]?.c?.[0]?.v ?? '').trim()
+}
+
+const fetchBonusIslandNames = async (wave: number, rows: any[]) => {
+  const fromVisibleColumns = bonusIslandFromRows(rows)
+  if (fromVisibleColumns) return fromVisibleColumns
+  const oRows = await fetchSheetRows(`${getWaveSheetQuery(wave)}&range=${encodeURIComponent('O20:O20')}`)
+  return String(cellValue(oRows?.[0]?.c?.[0]) ?? '').trim()
 }
 
 function FinanceHistory({
@@ -258,9 +277,10 @@ function FinanceHistory({
       let morningAdded = false
 
       for (const wave of wavesToRead) {
-        const [rows, islandRangeRows] = await Promise.all([
+        const [rows, islandRangeRows, financeRangeRows] = await Promise.all([
           fetchSheetRows(getWaveSheetQuery(wave)),
           fetchSheetRows(`${getWaveSheetQuery(wave)}&range=${encodeURIComponent('A5:P16')}`),
+          fetchSheetRows(`${getWaveSheetQuery(wave)}&range=${encodeURIComponent('A5:AB16')}`),
         ])
         const row = rows.find((r: any) => parseInt(String(cellValue(r?.c?.[0]) ?? '')) === selectedBaan)
         if (!row) continue
@@ -268,11 +288,17 @@ function FinanceHistory({
         const c = row.c ?? []
         const islandRangeRow = islandRangeRows.find((r: any) => parseInt(String(cellValue(r?.c?.[0]) ?? '')) === selectedBaan)
         const islandRangeCells = islandRangeRow?.c ?? []
+        const financeRow = financeRangeRows.find((r: any) => parseInt(String(cellValue(r?.c?.[0]) ?? '')) === selectedBaan)
+        const financeCells = financeRow?.c ?? []
         const read = (idx: number) => cellValue(c?.[idx])
+        const readFinance = (idx: number) => cellValue(financeCells?.[idx])
         const hasTextValue = (value: unknown) => String(value ?? '').trim() !== ''
         const numberAt = (idx: number) => parseSheetNumber(read(idx)) ?? 0
         const textAt = (idx: number) => String(read(idx) ?? '').trim()
         const hasCellValue = (idx: number) => textAt(idx) !== ''
+        const financeNumberAt = (idx: number) => parseSheetNumber(readFinance(idx)) ?? numberAt(idx)
+        const financeTextAt = (idx: number) => String(readFinance(idx) ?? read(idx) ?? '').trim()
+        const hasFinanceCellValue = (idx: number) => financeTextAt(idx) !== ''
         const islandRangeRead = (localIdx: number) => {
           return cellValue(islandRangeCells?.[localIdx + 7])
         }
@@ -327,14 +353,17 @@ function FinanceHistory({
         const winnerRow = rows.find((r: any) => String(cellValue(r?.c?.[6]) ?? '').trim() === '1')
         const winningKingHouse = winnerRow ? parseInt(String(cellValue(winnerRow?.c?.[0]) ?? '')) : null
         const winningKingBid = winnerRow ? parseSheetNumber(cellValue(winnerRow?.c?.[5])) ?? 0 : 0
-        const currentKingGain = numberAt(23)
-        const bonusIslandAmount = wave === 2 ? numberAt(22) : 0
-        const ladderAmount = wave === 2 || wave === 4 ? numberAt(24) : 0
-        const honestyAmount = numberAt(25)
-        const adminLabel = textAt(26)
-        const adminAmount = numberAt(27)
-        const hasAdminAmount = hasCellValue(27)
+        const lastKingBonus = wave === 5 ? financeNumberAt(21) : 0
+        const totalOccupationBonus = wave === 5 ? financeNumberAt(22) : 0
+        const currentKingGain = financeNumberAt(23)
+        const bonusIslandAmount = wave === 2 ? financeNumberAt(22) : 0
+        const ladderAmount = wave === 2 || wave === 4 ? financeNumberAt(24) : 0
+        const honestyAmount = financeNumberAt(25)
+        const adminLabel = financeTextAt(26)
+        const adminAmount = financeNumberAt(27)
+        const hasAdminAmount = hasFinanceCellValue(27)
         const disownedGroup = wave === 4 ? await fetchDisownedGroup(wave, rows) : ''
+        const bonusIslandNames = wave === 2 ? await fetchBonusIslandNames(wave, rows) : ''
 
         const betHouse = textAt(2)
         const betAmountSheet = numberAt(3)
@@ -364,7 +393,7 @@ function FinanceHistory({
         }
 
         const islandBidLines: string[] = []
-        const islandReturnLines: string[] = []
+        const islandReturnLines: HistoryDetailLine[] = []
         let islandSpentTotal = 0
         let islandReturnTotal = 0
         ;[
@@ -383,12 +412,17 @@ function FinanceHistory({
             islandSpentTotal += spent
           }
           if (area || spent || got) {
-            const suffix = area && affectedAreas.has(area)
-              ? ' (โดน disaster)'
-              : got <= 0
-                ? ' (ประมูลแพ้)'
-                : ''
-            islandReturnLines.push(`${area || '-'}: ${got.toLocaleString()}${suffix}`)
+            const disasteredWin = got > 0 && Boolean(area) && affectedAreas.has(area)
+            const statusText = got <= 0
+              ? 'ประมูลแพ้'
+              : disasteredWin
+                ? `ประมูลชนะ แต่โดน disaster${kingHouse ? ` โดยบ้าน ${kingHouse}` : ''}`
+                : 'ประมูลชนะ'
+            islandReturnLines.push({
+              area: area || '-',
+              text: `${got.toLocaleString()} (${statusText})`,
+              deleted: disasteredWin,
+            })
             islandReturnTotal += got
           }
         })
@@ -406,6 +440,8 @@ function FinanceHistory({
         const visibleResultAdjustments =
           betReturn +
           islandReturnTotal +
+          lastKingBonus +
+          totalOccupationBonus +
           currentKingGain +
           bonusIslandAmount +
           ladderAmount +
@@ -453,17 +489,28 @@ function FinanceHistory({
         if (revealWave) {
           const resultEntries = [
             {
+              label: 'Total Occupation Bonus',
+              detail: '+10000/occupied area',
+              amount: totalOccupationBonus,
+              order: wave * 100 + 43.2,
+            },
+            {
               label: 'Current king gain',
+              detail: 'จาก 50% ของเงินประมูลชนะใน disasater-ed area',
               amount: currentKingGain,
               order: wave * 100 + 44,
             },
             {
               label: 'Bonus island',
+              detail: bonusIslandNames
+                ? `From Money Drop\nBonus Island : ${bonusIslandNames}`
+                : 'From Money Drop',
               amount: bonusIslandAmount,
               order: wave * 100 + 46,
             },
             {
               label: 'Honesty',
+              detail: '+1000/พื้นที่ ถ้าลงทุนตามที่สัญญาในห้องทูต',
               amount: honestyAmount,
               order: wave * 100 + 47,
             },
@@ -473,6 +520,7 @@ function FinanceHistory({
             order: x.order,
             wave,
             label: x.label,
+            detail: x.detail,
             amount: x.amount,
             type: x.amount >= 0 ? 'income' : 'lose',
             revealResult: isCurrentWave,
@@ -520,22 +568,27 @@ function FinanceHistory({
             order: wave * 100 + 70,
             wave,
             label: 'Island return',
-            detail: islandReturnLines.join('\n'),
+            detailLines: islandReturnLines,
             amount: islandReturnTotal,
             type: islandReturnTotal > 0 ? 'income' : 'lose',
             revealResult: isCurrentWave,
           })
         }
         if (revealWave && (kingAmount || kingResult || winningKingHouse)) {
+          const wonKing = kingResult === '1'
+          const kingResultAmount = wonKing && wave === TOTAL_WAVES ? lastKingBonus : 0
+          const kingDetail = kingResult === '1'
+            ? wave === TOTAL_WAVES
+              ? `คุณชนะประมูล King ด้วยเงิน ${winningKingBid.toLocaleString()} - ซึ่งได้ Bonus ${lastKingBonus.toLocaleString()}`
+              : `คุณชนะประมูล King ด้วยเงิน ${winningKingBid.toLocaleString()} - จะได้เป็น King ในรอบถัดไป`
+            : `คุณไม่ชนะการประมูล King${winningKingHouse ? `, บ้าน ${winningKingHouse} ชนะด้วยเงิน ${winningKingBid.toLocaleString()}` : ''}`
           nextEntries.push({
             order: wave * 100 + 80,
             wave,
             label: 'King result',
-            detail: kingResult === '1'
-              ? `Will be next king · winning bid ${winningKingBid.toLocaleString()}`
-              : `Not king${winningKingHouse ? ` · House ${winningKingHouse} won with ${winningKingBid.toLocaleString()}` : ''}${kingHouse ? ` · current king House ${kingHouse}` : ''}`,
-            amount: 0,
-            type: kingResult === '1' ? 'reward' : 'lose',
+            detail: kingDetail,
+            amount: kingResultAmount,
+            type: wonKing ? 'reward' : 'lose',
             revealResult: isCurrentWave,
           })
         }

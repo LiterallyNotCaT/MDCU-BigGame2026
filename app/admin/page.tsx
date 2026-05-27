@@ -227,9 +227,22 @@ function AdminContent() {
       notify('Event is available only in Wave 2 and Wave 4', 'warn')
       return
     }
-    const fallback = gs.gameMode === 'bet' ? BET_PLAY_MINUTES : gs.gameMode === 'event' ? EVENT_PLAY_MINUTES : BID_PLAY_MINUTES
+    const isDisasterSelect = gs.gameMode === 'bid' && gs.gamePhase === 'select-disaster'
+    const fallback = gs.gameMode === 'bet'
+      ? BET_PLAY_MINUTES
+      : gs.gameMode === 'event'
+        ? EVENT_PLAY_MINUTES
+        : isDisasterSelect
+          ? DISASTER_SELECT_MINUTES
+          : BID_PLAY_MINUTES
     const mins = parseFloat(duration)||fallback
-    applyGS({isOpen:true, timerEnd:new Date(Date.now()+mins*60000).toISOString(), duration:mins, showResults:false, gamePhase:'play'})
+    applyGS({
+      isOpen:true,
+      timerEnd:new Date(Date.now()+mins*60000).toISOString(),
+      duration:mins,
+      showResults:false,
+      gamePhase:isDisasterSelect ? 'select-disaster' : 'play',
+    })
     notify(`▶ เปิดรับข้อมูล ${mins} นาที`)
   }
   const stopTimer = () => { applyGS({isOpen:false}); notify('⏹ ปิดรับข้อมูลแล้ว') }

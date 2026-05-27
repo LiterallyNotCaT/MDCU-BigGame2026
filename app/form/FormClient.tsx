@@ -53,6 +53,23 @@ type FormLiveState = {
   }>
 }
 
+type MoneyDropSpecialRound = {
+  index: number
+  label: string
+  wave: 2 | 4
+  value: string
+  confirmed: boolean
+  locked: boolean
+  saving?: boolean
+  error?: string
+}
+
+type MoneyDropSpecialState = {
+  formKey: string
+  liveKey: string
+  rounds: MoneyDropSpecialRound[]
+}
+
 const FORM_TABS = ['เช้าล่าง', 'เช้าบน', 'Games บ่าย']
 const FORM_SESSION_STORAGE_KEY = 'biggame_form_sessions_v1'
 
@@ -264,6 +281,10 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
   const [savingRounds, setSavingRounds] = useState<Set<number>>(() => new Set())
   const [controlBusy, setControlBusy] = useState(false)
   const [bulkControl, setBulkControl] = useState<{ kind: BulkControlKind } | null>(null)
+  const [moneyDropSpecial, setMoneyDropSpecial] = useState<MoneyDropSpecialState | null>(null)
+  const [moneyDropSpecialDraft, setMoneyDropSpecialDraft] = useState<string[]>(['', ''])
+  const [moneyDropSpecialLoading, setMoneyDropSpecialLoading] = useState(false)
+  const [moneyDropSpecialSaving, setMoneyDropSpecialSaving] = useState<Set<number>>(() => new Set())
   const [notice, setNotice] = useState<{ type: 'ok' | 'err' | 'warn'; text: string } | null>(null)
   const [oauthProfile, setOauthProfile] = useState<OAuthFormProfile | null>(null)
   const [oauthLoading, setOauthLoading] = useState(true)
@@ -361,6 +382,29 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     setParticipantsByRound(prev => prev.map((value, index) => live.rounds[String(index)]?.participants || value))
   }, [])
 
+  const applyMoneyDropSpecialLive = useCallback((live: FormLiveState) => {
+    if (!live?.formKey || !live.version || !live.rounds) return
+    setMoneyDropSpecial(prev => {
+      if (!prev || prev.liveKey !== live.formKey) return prev
+      return {
+        ...prev,
+        rounds: prev.rounds.map(round => {
+          const liveRound = live.rounds[String(round.index)]
+          if (!liveRound) return round
+          return {
+            ...round,
+            value: liveRound.values?.[0] ?? round.value,
+            confirmed: liveRound.confirmed === true,
+            locked: liveRound.locked === true,
+            saving: liveRound.saving === true,
+            error: liveRound.error || '',
+          }
+        }),
+      }
+    })
+    setMoneyDropSpecialDraft(prev => prev.map((value, index) => live.rounds[String(index)]?.values?.[0] ?? value))
+  }, [])
+
   const refreshConfig = useCallback(async () => {
     setLoadingConfig(true)
     try {
@@ -410,12 +454,17 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     (grouped[tabName] ?? []).filter(form => !form.blank).map(form => form.formKey)
   ), [grouped])
 
-  const loadStatesForTab = useCallback(async (tabName: string, options?: { password?: string; oauth?: boolean }) => {
+  const loadStatesForTab = useCallback(async (tabName: string, options?: { password?: string; oauth?: boolean; force?: boolean }) => {
     const formKeys = formKeysForTab(tabName)
     if (!formKeys.length) return {}
     const data = await fetchJson<{ states: Record<string, ScoringFormState>; errors?: Record<string, string> }>('/api/forms/states', {
       method: 'POST',
-      body: JSON.stringify({ password: options?.password ?? '', oauth: options?.oauth === true, formKeys }),
+      body: JSON.stringify({
+        password: options?.password ?? '',
+        oauth: options?.oauth === true,
+        force: options?.force === true,
+        formKeys,
+      }),
     })
     const nextStates = data.states ?? {}
     setStatesByFormKey(prev => ({ ...prev, ...nextStates }))
@@ -518,7 +567,10 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     setStateLoadError('')
     try {
       if (adminSession && selectedForm) {
-        const loadedStates = await loadStatesForTab(selectedForm.tab, { password: adminSession?.password ?? '' })
+        const loadedStates = await loadStatesForTab(selectedForm.tab, {
+          password: adminSession?.password ?? '',
+          force: options?.force === true,
+        })
         const selectedState = loadedStates[nextFormKey]
         if (selectedState) {
           applyFormState(selectedState)
@@ -530,7 +582,10 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
         return
       }
       if (oauthProfile && selectedForm) {
-        const loadedStates = await loadStatesForTab(selectedForm.tab, { oauth: true })
+        const loadedStates = await loadStatesForTab(selectedForm.tab, {
+          oauth: true,
+          force: options?.force === true,
+        })
         const selectedState = loadedStates[nextFormKey]
         if (selectedState) {
           applyFormState(selectedState)
@@ -543,7 +598,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
       }
       const data = await fetchJson<{ state: ScoringFormState }>('/api/forms/state', {
         method: 'POST',
-        body: JSON.stringify({ formKey: nextFormKey }),
+        body: JSON.stringify({ formKey: nextFormKey, force: options?.force === true }),
       })
       applyFormState(data.state)
       setStatesByFormKey(prev => ({ ...prev, [nextFormKey]: data.state }))
@@ -699,6 +754,85 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
 
   const updateParticipants = (roundIndex: number, value: string) => {
     setParticipantsByRound(prev => prev.map((cell, index) => index === roundIndex ? value : cell))
+  }
+
+  const refreshMoneyDropSpecial = useCallback(async (nextFormKey = currentState?.form.formKey) => {
+    if (!nextFormKey) return
+    setMoneyDropSpecialLoading(true)
+    try {
+      const data = await fetchJson<{ state: MoneyDropSpecialState }>('/api/forms/money-drop-special', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'read', formKey: nextFormKey }),
+      })
+      setMoneyDropSpecial(data.state)
+      setMoneyDropSpecialDraft(data.state.rounds.map(round => round.value || ''))
+    } catch (error) {
+      notify('err', error instanceof Error ? error.message : String(error))
+    } finally {
+      setMoneyDropSpecialLoading(false)
+    }
+  }, [currentState?.form.formKey])
+
+  const updateMoneyDropSpecialDraft = (roundIndex: number, value: string) => {
+    setMoneyDropSpecialDraft(prev => prev.map((item, index) => index === roundIndex ? value : item))
+  }
+
+  const confirmMoneyDropSpecial = async (roundIndex: number) => {
+    if (!currentState || !session || !moneyDropSpecial) return
+    if (!isAdmin && !canEditCurrentForm) {
+      notify('warn', 'This form is view-only for your account.')
+      return
+    }
+    const round = moneyDropSpecial.rounds[roundIndex]
+    if (!round) return
+    if (!isAdmin && (round.confirmed || round.locked)) {
+      notify('warn', 'This input is already locked or confirmed.')
+      return
+    }
+    const rawValue = moneyDropSpecialDraft[roundIndex] ?? ''
+    const value = roundIndex === 0
+      ? (rawValue.toUpperCase().match(/[ABC]\s*[1-9]/g)?.map(item => item.replace(/\s+/g, '')) ?? []).filter((item, index, arr) => arr.indexOf(item) === index).join(', ')
+      : rawValue.trim().toUpperCase()
+    if (!value || (roundIndex === 1 && !/^[ABC]$/.test(value))) {
+      notify('err', roundIndex === 0 ? 'Please enter island names like A2, B3, C9.' : 'Please enter only A, B, or C.')
+      return
+    }
+    if (!window.confirm('Do you confirm? Please check this Money Drop special input before sending.')) return
+
+    setMoneyDropSpecialSaving(prev => new Set(prev).add(roundIndex))
+    setMoneyDropSpecialDraft(prev => prev.map((item, index) => index === roundIndex ? value : item))
+    setMoneyDropSpecial(prev => prev ? {
+      ...prev,
+      rounds: prev.rounds.map(item => item.index === roundIndex ? { ...item, value, locked: true, saving: true, error: '' } : item),
+    } : prev)
+    try {
+      const response = await fetchJson<{ queued?: boolean; message?: string }>('/api/forms/money-drop-special', {
+        method: 'POST',
+        body: JSON.stringify({
+          action: 'write',
+          formKey: currentState.form.formKey,
+          password: session.password,
+          oauth: session.authMode === 'oauth',
+          admin: isAdmin,
+          roundIndex,
+          value,
+        }),
+      })
+      notify('ok', response.message || 'Sending to sheet...')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setMoneyDropSpecial(prev => prev ? {
+        ...prev,
+        rounds: prev.rounds.map(item => item.index === roundIndex ? { ...item, locked: false, saving: false, error: message } : item),
+      } : prev)
+      notify('err', message)
+    } finally {
+      setMoneyDropSpecialSaving(prev => {
+        const next = new Set(prev)
+        next.delete(roundIndex)
+        return next
+      })
+    }
   }
 
   const confirmRound = async (roundIndex: number) => {
@@ -903,6 +1037,39 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     }
   }
 
+  const setMoneyDropSpecialControl = async (roundIndex: number, patch: Record<string, unknown>) => {
+    if (!moneyDropSpecial || (!adminSession && !oauthIsAdmin)) return
+    setControlBusy(true)
+    try {
+      const useOAuthControl = oauthIsAdmin && !adminSession
+      await fetchJson('/api/forms/control', {
+        method: 'POST',
+        body: JSON.stringify({
+          formKey: moneyDropSpecial.liveKey,
+          password: adminSession?.password ?? '',
+          oauth: useOAuthControl,
+          roundIndex,
+          ...patch,
+        }),
+      })
+      setMoneyDropSpecial(prev => prev ? {
+        ...prev,
+        rounds: prev.rounds.map(round => round.index === roundIndex ? {
+          ...round,
+          confirmed: patch.confirmed === undefined ? round.confirmed : patch.confirmed === true,
+          locked: patch.locked === undefined ? round.locked : patch.locked === true,
+          saving: false,
+          error: '',
+        } : round),
+      } : prev)
+      notify('ok', 'Money Drop special control updated')
+    } catch (error) {
+      notify('err', error instanceof Error ? error.message : String(error))
+    } finally {
+      setControlBusy(false)
+    }
+  }
+
   useEffect(() => {
     if (!adminSession || !forms.length) return
     const key = `${adminSession.password}:${tab}`
@@ -963,6 +1130,49 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     }
   }
 
+  useEffect(() => {
+    if (!currentState || !canSeeContent || currentState.form.user.toLowerCase().replace(/\s+/g, ' ').trim() !== 'money drop') {
+      setMoneyDropSpecial(null)
+      setMoneyDropSpecialDraft(['', ''])
+      return
+    }
+    refreshMoneyDropSpecial(currentState.form.formKey)
+  }, [canSeeContent, currentState?.form.formKey, currentState?.form.user, refreshMoneyDropSpecial])
+
+  useEffect(() => {
+    const liveKey = moneyDropSpecial?.liveKey ?? ''
+    if (!liveKey) return
+    let stopped = false
+    let timer: number | undefined
+
+    const schedule = () => {
+      if (!stopped) timer = window.setTimeout(sync, 700)
+    }
+
+    const sync = async () => {
+      if (stopped) return
+      if (document.hidden) {
+        schedule()
+        return
+      }
+      try {
+        const res = await fetch(`/api/forms/live?formKey=${encodeURIComponent(liveKey)}&t=${Date.now()}`, { cache: 'no-store' })
+        const data = await res.json().catch(() => null) as { ok?: boolean; live?: FormLiveState } | null
+        if (data?.ok && data.live) applyMoneyDropSpecialLive(data.live)
+      } catch {
+        // This is only the fast UI signal. The sheet write remains authoritative.
+      } finally {
+        schedule()
+      }
+    }
+
+    sync()
+    return () => {
+      stopped = true
+      if (timer) window.clearTimeout(timer)
+    }
+  }, [applyMoneyDropSpecialLive, moneyDropSpecial?.liveKey])
+
   const selectedAutoRow = currentState && currentState.form.kind !== 'match-single' ? fillToRank : -1
   const visibleRankLabels = currentState
     ? currentState.rankLabels.slice(0, currentState.form.rankCount || currentState.rankLabels.length)
@@ -972,6 +1182,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     : []
   const isScoreNumberForm = currentState?.form.kind === 'score-number'
   const isScoreInputForm = currentState?.form.kind === 'score-number' || currentState?.form.kind === 'score-unsigned'
+  const isMoneyDropForm = currentState?.form.user.toLowerCase().replace(/\s+/g, ' ').trim() === 'money drop'
   const usesAutoRemainder = currentState?.form.usesAutoRemainder === true
   const showAutoControls = Boolean(currentState && usesAutoRemainder)
   const effectiveSelectedAutoRow = usesAutoRemainder ? selectedAutoRow : -1
@@ -1286,6 +1497,89 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
                     <strong>หมายเหตุ</strong>
                     <span>ถ้าเสียใส่ - เช่น -500</span>
                     <span>ถ้าบวก ใส่แค่เลข</span>
+                  </div>
+                )}
+                {isMoneyDropForm && (
+                  <div className="moneydrop-special-card">
+                    <div className="moneydrop-special-header">
+                      <div>
+                        <h2>Money Drop special input</h2>
+                      </div>
+                      <button type="button" onClick={() => refreshMoneyDropSpecial(currentState.form.formKey)} className="btn btn-ghost" disabled={moneyDropSpecialLoading}>
+                        <RefreshCw size={13} className={clsx(moneyDropSpecialLoading && 'animate-spin')} />
+                        Refresh
+                      </button>
+                    </div>
+                    <div className="form-table-wrap moneydrop-special-wrap">
+                      <table className="form-score-table moneydrop-special-table">
+                        <thead>
+                          <tr>
+                            <th>-</th>
+                            {(moneyDropSpecial?.rounds ?? [
+                              { index: 0, label: 'Wave 2', wave: 2, value: '', confirmed: false, locked: false },
+                              { index: 1, label: 'Wave 4', wave: 4, value: '', confirmed: false, locked: false },
+                            ]).map(round => (
+                              <th key={round.index}>
+                                <div className="moneydrop-special-head-cell">
+                                  <span>{round.label}</span>
+                                  {(adminSession || oauthIsAdmin) && moneyDropSpecial && (
+                                    <div className="moneydrop-special-head-actions">
+                                      <button type="button" className="btn btn-ghost" disabled={controlBusy} onClick={() => setMoneyDropSpecialControl(round.index, { locked: !round.locked })}>
+                                        {round.locked ? <Unlock size={12} /> : <Lock size={12} />}
+                                        {round.locked ? 'Unlock' : 'Lock'}
+                                      </button>
+                                      <button type="button" className="btn btn-ghost" disabled={controlBusy} onClick={() => setMoneyDropSpecialControl(round.index, { confirmed: false, locked: false, clearDeadline: true })}>
+                                        Edit
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                          <tr>
+                            <th>Input</th>
+                            {(moneyDropSpecial?.rounds ?? []).map(round => {
+                              const isSending = moneyDropSpecialSaving.has(round.index) || round.saving === true
+                              const editable = Boolean(session && canEditCurrentForm && (isAdmin || (!round.confirmed && !round.locked && !isSending)))
+                              return (
+                                <td key={round.index}>
+                                  <input
+                                    value={moneyDropSpecialDraft[round.index] ?? ''}
+                                    onChange={event => updateMoneyDropSpecialDraft(round.index, event.target.value)}
+                                    onBlur={event => updateMoneyDropSpecialDraft(round.index, round.index === 0
+                                      ? (event.target.value.toUpperCase().match(/[ABC]\s*[1-9]/g)?.map(item => item.replace(/\s+/g, '')) ?? []).filter((item, index, arr) => arr.indexOf(item) === index).join(', ')
+                                      : event.target.value.trim().toUpperCase())}
+                                    disabled={!editable}
+                                    placeholder={round.index === 0 ? 'A2, B3, C9' : 'A / B / C'}
+                                  />
+                                  {round.error && <div className="form-round-error">{round.error}</div>}
+                                </td>
+                              )
+                            })}
+                          </tr>
+                        </tbody>
+                        <tfoot>
+                          <tr>
+                            <th>Confirm</th>
+                            {(moneyDropSpecial?.rounds ?? []).map(round => {
+                              const isSending = moneyDropSpecialSaving.has(round.index) || round.saving === true
+                              const disabled = isSending || !canEditCurrentForm || (!isAdmin && (round.confirmed || round.locked))
+                              return (
+                                <td key={round.index}>
+                                  <button type="button" className={clsx('form-confirm-btn', round.confirmed && 'confirmed')} disabled={disabled} onClick={() => confirmMoneyDropSpecial(round.index)}>
+                                    {isSending ? 'Sending...' : round.confirmed ? 'Confirmed' : 'Confirm'}
+                                    {!round.confirmed && !isSending && <Send size={13} />}
+                                  </button>
+                                </td>
+                              )
+                            })}
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
                   </div>
                 )}
               </div>

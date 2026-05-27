@@ -207,7 +207,7 @@ function BiddingCart({
                     </div>
                   </div>
                   <button onClick={()=>remove(item.area)} disabled={!amountControlsOpen}
-                    className="w-7 h-7 rounded-xl bg-red-500/10 text-red-500/60 hover:bg-red-500/20 hover:text-red-300
+                    className="cart-remove-button w-7 h-7 rounded-xl bg-red-500/10 text-red-500/60 hover:bg-red-500/20 hover:text-red-300
                       flex items-center justify-center transition-all disabled:opacity-30 flex-shrink-0">
                     <X size={11} />
                   </button>

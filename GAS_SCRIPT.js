@@ -88,6 +88,15 @@ function doPost(e) {
     } else if (payload.action === 'writeFormScoreOAuth') {
       const result = handleWriteFormScoreOAuth(payload)
       output.setContent(JSON.stringify(result))
+    } else if (payload.action === 'readMoneyDropSpecial') {
+      const result = handleReadMoneyDropSpecial(payload)
+      output.setContent(JSON.stringify(result))
+    } else if (payload.action === 'writeMoneyDropSpecial') {
+      const result = handleWriteMoneyDropSpecial(payload)
+      output.setContent(JSON.stringify(result))
+    } else if (payload.action === 'writeMoneyDropSpecialOAuth') {
+      const result = handleWriteMoneyDropSpecialOAuth(payload)
+      output.setContent(JSON.stringify(result))
     } else if (payload.action === 'setFormRoundControlOAuth') {
       const result = handleSetFormRoundControlOAuth(payload)
       output.setContent(JSON.stringify(result))
@@ -786,12 +795,13 @@ function readFormState_(form, skipCache) {
 function handleReadFormState(payload) {
   const form = findFormConfig_(payload.formKey, false)
   if (!form) return { status: 'error', message: 'Form not found' }
-  return { status: 'ok', state: readFormState_(form) }
+  return { status: 'ok', state: readFormState_(form, payload.force === true) }
 }
 
 function handleReadFormStates(payload) {
   const password = String(payload.password || '')
   if (!password || password !== getAdminPassword_()) return { status: 'error', message: 'Wrong admin password' }
+  const skipCache = payload.force === true
 
   const requested = Array.isArray(payload.formKeys)
     ? payload.formKeys.reduce((set, key) => {
@@ -806,7 +816,7 @@ function handleReadFormStates(payload) {
     if (requested && !requested[form.formKey]) return
     if (form.blank) return
     try {
-      states[form.formKey] = readFormState_(form)
+      states[form.formKey] = readFormState_(form, skipCache)
     } catch (err) {
       errors[form.formKey] = String(err && err.message ? err.message : err)
     }
@@ -1203,6 +1213,7 @@ function handleReadOAuthLogin(payload) {
 
 function handleReadFormStatesOAuth(payload) {
   const profile = readOAuthProfile_(payload.email)
+  const skipCache = payload.force === true
   const requested = Array.isArray(payload.formKeys)
     ? payload.formKeys.reduce((set, key) => {
       if (key) set[String(key)] = true
@@ -1217,7 +1228,7 @@ function handleReadFormStatesOAuth(payload) {
     if (requested && !requested[form.formKey]) return
     if (!oauthCanViewForm_(profile, form)) return
     try {
-      states[form.formKey] = readFormState_(form)
+      states[form.formKey] = readFormState_(form, skipCache)
     } catch (err) {
       errors[form.formKey] = String(err && err.message ? err.message : err)
     }
@@ -1234,6 +1245,105 @@ function handleWriteFormScoreOAuth(payload) {
   if (!oauthCanEditForm_(profile, form)) return { status: 'error', message: 'This form is view-only for your account' }
 
   return writeFormScoreForUser_(form, payload, profile.nickname || profile.email || 'OAuth user')
+}
+
+function findMoneyDropForm_(formKey, includePassword) {
+  const forms = readFormConfigs_(includePassword)
+  return forms.find(form => String(form.formKey) === String(formKey) && String(form.user || '').toLowerCase().replace(/\s+/g, ' ').trim() === 'money drop') || null
+}
+
+function moneyDropSpecialLiveKey_(formKey) {
+  return `${formKey}::money-drop-special`
+}
+
+function normalizeMoneyDropSpecialIslandList_(value) {
+  const matches = String(value || '').toUpperCase().match(/[ABC]\s*[1-9]/g) || []
+  const seen = {}
+  const result = []
+  matches.forEach(item => {
+    const area = item.replace(/\s+/g, '')
+    if (!seen[area]) {
+      seen[area] = true
+      result.push(area)
+    }
+  })
+  return result.join(', ')
+}
+
+function normalizeMoneyDropSpecialGroup_(value) {
+  const clean = String(value || '').trim().toUpperCase()
+  return /^[ABC]$/.test(clean) ? clean : ''
+}
+
+function normalizeMoneyDropSpecialValue_(roundIndex, value) {
+  return Number(roundIndex) === 0
+    ? normalizeMoneyDropSpecialIslandList_(value)
+    : normalizeMoneyDropSpecialGroup_(value)
+}
+
+function readMoneyDropSpecialCell_(wave) {
+  const ss = SpreadsheetApp.openById(SHEET_ID)
+  const sheet = getWaveSheet_(ss, wave)
+  if (!sheet) throw new Error(`Wave ${wave} sheet not found`)
+  return String(sheet.getRange(20, 15).getDisplayValue() || '').trim()
+}
+
+function writeMoneyDropSpecialCell_(wave, value) {
+  const ss = SpreadsheetApp.openById(SHEET_ID)
+  const sheet = getWaveSheet_(ss, wave)
+  if (!sheet) throw new Error(`Wave ${wave} sheet not found`)
+  sheet.getRange(20, 15).setValue(value)
+}
+
+function handleReadMoneyDropSpecial(payload) {
+  const form = findMoneyDropForm_(payload.formKey, false)
+  if (!form) return { status: 'error', message: 'Money Drop form not found' }
+  return {
+    status: 'ok',
+    state: {
+      formKey: form.formKey,
+      liveKey: moneyDropSpecialLiveKey_(form.formKey),
+      rounds: [
+        { index: 0, label: 'Wave 2', wave: 2, value: readMoneyDropSpecialCell_(2), confirmed: false, locked: false },
+        { index: 1, label: 'Wave 4', wave: 4, value: readMoneyDropSpecialCell_(4), confirmed: false, locked: false },
+      ],
+    },
+  }
+}
+
+function writeMoneyDropSpecialForUser_(form, payload, username) {
+  const roundIndex = Number(payload.roundIndex)
+  if (!Number.isInteger(roundIndex) || roundIndex < 0 || roundIndex > 1) return { status: 'error', message: 'Invalid round' }
+  const value = normalizeMoneyDropSpecialValue_(roundIndex, payload.value)
+  if (!value) return { status: 'error', message: roundIndex === 0 ? 'Please enter island names like A2, B3, C9.' : 'Please enter only A, B, or C.' }
+
+  let lock = null
+  try {
+    lock = acquireNamedLock_('FORM_WRITE_LOCK', 45000)
+    writeMoneyDropSpecialCell_(roundIndex === 0 ? 2 : 4, value)
+    return { status: 'ok', message: `${form.user} special input saved`, roundIndex, value, confirmedBy: username || 'Unknown' }
+  } catch (err) {
+    const message = String(err && err.message ? err.message : err)
+    return { status: 'error', message: /lock|timeout|timed out/i.test(message) ? 'Form sheet is busy. Please retry.' : message }
+  } finally {
+    releaseNamedLock_(lock)
+  }
+}
+
+function handleWriteMoneyDropSpecial(payload) {
+  const form = findMoneyDropForm_(payload.formKey, true)
+  if (!form) return { status: 'error', message: 'Money Drop form not found' }
+  const auth = validateFormAuth_(form, payload)
+  if (!auth.ok) return { status: 'error', message: auth.message || 'Unauthorized' }
+  return writeMoneyDropSpecialForUser_(form, payload, auth.username)
+}
+
+function handleWriteMoneyDropSpecialOAuth(payload) {
+  const form = findMoneyDropForm_(payload.formKey, false)
+  if (!form) return { status: 'error', message: 'Money Drop form not found' }
+  const profile = readOAuthProfile_(payload.email)
+  if (!oauthCanEditForm_(profile, form)) return { status: 'error', message: 'This form is view-only for your account' }
+  return writeMoneyDropSpecialForUser_(form, payload, profile.nickname || profile.email || 'OAuth user')
 }
 
 function handleSetFormRoundControlOAuth(payload) {

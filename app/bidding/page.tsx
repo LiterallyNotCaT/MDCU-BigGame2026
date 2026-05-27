@@ -427,6 +427,7 @@ function BiddingGame({ baan }: { baan:number }) {
   const hydratedSubmissionKey = useRef('')
   const historySectionRef = useRef<HTMLElement | null>(null)
   const previousResultState = useRef<{ wave: number; showResults: boolean } | null>(null)
+  const previousOpenState = useRef(getGameState().isOpen)
   const highlightTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const totalBet = useMemo(() => cart.reduce((s,i)=>s+i.amount,0), [cart])
   const islandCart = useMemo(() => cart.filter(i => i.area !== 'KING'), [cart])
@@ -752,13 +753,14 @@ function BiddingGame({ baan }: { baan:number }) {
 
   /* save — local store + write to Google Sheet */
   const handleSave = useCallback(async (mode: 'manual' | 'auto' = 'manual')=>{
-    if(!gs.isOpen) return
+    if(!gs.isOpen && mode !== 'auto') return
     if(isEventMode) return
     if(mode === 'auto' && isSaved) return
     if(saveInFlight.current) return
     const hasInvalidBidAmount = cart.some(i => !Number.isFinite(i.amount) || i.amount < 100)
     if(isBetMode && !isBetAmountValid) return
-    if(isSelectDisasterPhase && (!canSelectKingDisaster || !kingDis)) return
+    const canSubmitDisaster = canSelectKingDisaster || (mode === 'auto' && isSelectDisasterPhase && canChooseKingDisaster)
+    if(isSelectDisasterPhase && (!canSubmitDisaster || !kingDis)) return
     if(!isBetMode && !isSelectDisasterPhase && (hasInvalidBidAmount || !Number.isFinite(totalBet) || totalBet <= 0 || totalBet > effectiveBalance)) return
 
     const timestamp = new Date().toLocaleTimeString('th-TH')
@@ -773,7 +775,7 @@ function BiddingGame({ baan }: { baan:number }) {
       wave: gs.currentWave,
       bets: isBetMode || isSelectDisasterPhase ? currentSubmission?.bets ?? [] : cart,
       isKing: canChooseKingDisaster,
-      kingDisaster: canSelectKingDisaster ? kingDis ?? undefined : currentSubmission?.kingDisaster,
+      kingDisaster: canSubmitDisaster ? kingDis ?? undefined : currentSubmission?.kingDisaster,
       betTarget: isBetMode && betTarget ? parseInt(betTarget) : currentSubmission?.betTarget,
       betAmount: isBetMode ? betSpend : currentSubmission?.betAmount,
       timestamp,
@@ -837,6 +839,14 @@ function BiddingGame({ baan }: { baan:number }) {
     }
     setBetAmount(String(Math.min(Math.max(minBetAmount, raw), balance)))
   }
+
+  useEffect(() => {
+    const wasOpen = previousOpenState.current
+    previousOpenState.current = gs.isOpen
+    if (wasOpen && !gs.isOpen) {
+      void handleSave('auto')
+    }
+  }, [gs.isOpen, handleSave])
 
   if (!isLoaded) return (
     <div className="wire-page-full">

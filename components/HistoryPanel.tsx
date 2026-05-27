@@ -4,10 +4,17 @@ import clsx from 'clsx'
 import { HOUSE_COLORS, HOUSE_NAMES } from '@/lib/constants'
 import { TrendingUp, TrendingDown, Target, Star, AlertTriangle, Sunrise } from 'lucide-react'
 
+interface HistoryDetailLine {
+  area?: string
+  text: string
+  deleted?: boolean
+}
+
 interface HistoryEntry {
   wave?:      number
   label:      string
   detail?:    string
+  detailLines?: HistoryDetailLine[]
   detailItems?: string[]
   amount:     number
   type:       'income' | 'bet' | 'reward' | 'lose' | 'start' | 'disaster'
@@ -145,6 +152,23 @@ export default function HistoryPanel({
                         <div className="history-entry-label text-sm text-slate-300 leading-snug">{entry.label}</div>
                         {entry.detail && (
                           <div className="history-entry-detail text-slate-600 mt-1 leading-relaxed whitespace-pre-line">{entry.detail}</div>
+                        )}
+                        {entry.detailLines && entry.detailLines.length > 0 && (
+                          <div className="history-entry-detail-lines">
+                            {entry.detailLines.map((line, lineIndex) => (
+                              <div key={`${line.area ?? 'detail'}-${lineIndex}`} className="history-entry-detail-line">
+                                {line.area && (
+                                  <>
+                                    <span className={clsx('history-entry-area-name', line.deleted && 'is-deleted')}>
+                                      {line.area}
+                                    </span>
+                                    <span>:&nbsp;</span>
+                                  </>
+                                )}
+                                <span>{line.text}</span>
+                              </div>
+                            ))}
+                          </div>
                         )}
                         {entry.detailItems && entry.detailItems.length > 0 && (
                           <div className="history-entry-chips">

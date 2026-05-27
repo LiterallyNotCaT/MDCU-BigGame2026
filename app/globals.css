@@ -3017,6 +3017,30 @@ form .btn.w-full {
   color: #44546b !important;
   line-height: 1.45 !important;
 }
+.history-entry-detail-lines {
+  display: grid;
+  gap: 2px;
+  margin-top: 4px;
+  color: #44546b;
+  font-size: clamp(0.88rem, 1.05vw, 1rem);
+  font-weight: 650;
+  line-height: 1.45;
+}
+.history-entry-detail-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+}
+.history-entry-area-name {
+  font-weight: 950;
+  color: #20314d;
+}
+.history-entry-area-name.is-deleted {
+  color: #dc2626;
+  text-decoration-line: line-through;
+  text-decoration-thickness: 2px;
+  text-decoration-color: #dc2626;
+}
 .history-entry-chips {
   display: flex;
   flex-wrap: wrap;
@@ -4649,6 +4673,147 @@ form .btn.w-full {
 .form-score-note strong {
   color: #334155;
 }
+.moneydrop-special-card {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 14px;
+  background: #f8fbff;
+}
+.moneydrop-special-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.moneydrop-special-header h2 {
+  margin: 0;
+  color: #0f172a;
+  font-size: clamp(1rem, 1.15vw, 1.2rem);
+  font-weight: 1000;
+}
+.moneydrop-special-wrap {
+  border-radius: 12px;
+}
+.moneydrop-special-table {
+  min-width: 520px;
+}
+.moneydrop-special-table th:first-child {
+  min-width: 76px;
+}
+.moneydrop-special-head-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+.moneydrop-special-head-cell > span {
+  font-weight: 1000;
+}
+.moneydrop-special-head-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+.moneydrop-special-head-actions .btn {
+  min-height: 28px;
+  padding: 4px 7px;
+  border-radius: 8px;
+  font-size: 0.68rem;
+}
+@media (max-width: 640px) {
+  .moneydrop-special-card {
+    padding: 9px;
+  }
+
+  .moneydrop-special-header {
+    align-items: center;
+    gap: 8px;
+  }
+
+  .moneydrop-special-header h2 {
+    font-size: 0.94rem;
+    line-height: 1.15;
+  }
+
+  .moneydrop-special-header .btn {
+    min-height: 32px;
+    padding: 6px 9px;
+    font-size: 0.72rem;
+  }
+
+  .moneydrop-special-wrap {
+    overflow-x: visible;
+  }
+
+  .moneydrop-special-table {
+    width: 100%;
+    min-width: 0;
+    table-layout: fixed;
+  }
+
+  .moneydrop-special-table th,
+  .moneydrop-special-table td {
+    padding: 6px 5px;
+  }
+
+  .moneydrop-special-table th:first-child,
+  .moneydrop-special-table td:first-child {
+    width: 52px;
+    min-width: 0;
+    font-size: 0.72rem;
+  }
+
+  .moneydrop-special-head-cell {
+    gap: 4px;
+  }
+
+  .moneydrop-special-head-cell > span {
+    flex-basis: 100%;
+    font-size: 0.72rem;
+    line-height: 1;
+  }
+
+  .moneydrop-special-head-actions {
+    width: 100%;
+    gap: 3px;
+  }
+
+  .moneydrop-special-head-actions .btn {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 26px;
+    padding: 3px 4px;
+    border-radius: 7px;
+    font-size: 0.58rem;
+    line-height: 1;
+    white-space: nowrap;
+  }
+
+  .moneydrop-special-table input {
+    width: 100%;
+    min-width: 0;
+    height: 36px;
+    padding: 7px 8px;
+    font-size: 0.78rem;
+  }
+
+  .moneydrop-special-table .form-confirm-btn {
+    min-width: 0;
+    min-height: 34px;
+    padding: 7px 6px;
+    font-size: 0.72rem;
+  }
+}
+.form-round-error {
+  margin-top: 4px;
+  color: #dc2626;
+  font-size: 0.68rem;
+  font-weight: 850;
+}
 .form-participant-row th,
 .form-participant-row td {
   background: #f5f3ff !important;
@@ -5074,6 +5239,145 @@ form .btn.w-full {
   .form-score-note {
     justify-content: flex-start;
     font-size: 0.68rem;
+  }
+
+  .form-score-table.moneydrop-special-table {
+    width: 100%;
+    min-width: 0;
+    table-layout: fixed;
+  }
+
+  .moneydrop-special-card {
+    margin-top: 10px;
+    padding: 7px;
+    border-radius: 12px;
+  }
+
+  .moneydrop-special-wrap {
+    overflow-x: hidden;
+    border-radius: 10px;
+  }
+
+  .form-score-table.moneydrop-special-table th,
+  .form-score-table.moneydrop-special-table td {
+    padding: 4px 3px;
+  }
+
+  .form-score-table.moneydrop-special-table th:first-child,
+  .form-score-table.moneydrop-special-table td:first-child {
+    width: 40px;
+    min-width: 40px;
+    max-width: 40px;
+    font-size: 0.66rem;
+  }
+
+  .moneydrop-special-head-cell {
+    min-width: 0;
+    gap: 3px;
+  }
+
+  .moneydrop-special-head-cell > span {
+    flex: 0 0 auto;
+    font-size: 0.66rem;
+  }
+
+  .moneydrop-special-head-actions {
+    flex: 1 1 100%;
+    min-width: 0;
+    gap: 3px;
+  }
+
+  .moneydrop-special-head-actions .btn {
+    min-width: 0;
+    min-height: 24px;
+    padding: 2px 4px;
+    border-radius: 7px;
+    font-size: 0.56rem;
+    line-height: 1;
+  }
+
+  .form-score-table.moneydrop-special-table input {
+    height: 34px;
+    min-height: 34px;
+    padding: 6px 7px;
+    font-size: 0.72rem;
+  }
+
+  .form-score-table.moneydrop-special-table .form-confirm-btn {
+    min-height: 32px;
+    padding: 6px 4px;
+    font-size: 0.66rem;
+  }
+
+  .moneydrop-special-card {
+    overflow: hidden;
+  }
+
+  .moneydrop-special-wrap {
+    width: 100%;
+    overflow-x: hidden !important;
+  }
+
+  .form-score-table.moneydrop-special-table {
+    width: 100% !important;
+    min-width: 0 !important;
+    table-layout: fixed !important;
+  }
+
+  .form-score-table.moneydrop-special-table th:first-child,
+  .form-score-table.moneydrop-special-table td:first-child {
+    width: 56px !important;
+    min-width: 56px !important;
+    max-width: 56px !important;
+    padding-inline: 3px !important;
+    font-size: 0.6rem !important;
+    line-height: 1.05 !important;
+    overflow-wrap: anywhere;
+  }
+
+  .form-score-table.moneydrop-special-table th:not(:first-child),
+  .form-score-table.moneydrop-special-table td:not(:first-child) {
+    width: calc((100% - 56px) / 2) !important;
+    max-width: calc((100% - 56px) / 2) !important;
+    padding-inline: 3px !important;
+  }
+
+  .moneydrop-special-head-cell {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 3px;
+  }
+
+  .moneydrop-special-head-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    width: 100%;
+    gap: 2px;
+  }
+
+  .moneydrop-special-head-actions .btn {
+    justify-content: center;
+    min-height: 22px !important;
+    padding: 2px 3px !important;
+    font-size: 0.52rem !important;
+  }
+
+  .moneydrop-special-head-actions .btn svg {
+    width: 9px;
+    height: 9px;
+  }
+
+  .form-score-table.moneydrop-special-table input {
+    padding-inline: 6px !important;
+    font-size: 0.68rem !important;
+  }
+
+  .form-score-table.moneydrop-special-table .form-confirm-btn {
+    width: calc(100% - 6px);
+    min-width: 0 !important;
+    margin-inline: auto;
+    padding-inline: 2px !important;
+    font-size: 0.6rem !important;
   }
 
   .form-unlock-card {
@@ -5746,9 +6050,33 @@ body.fullscreen-fallback-open {
   min-height: 28px !important;
   border-radius: 10px !important;
   padding: 6px 11px !important;
-  color: #0f172a !important;
+  border-color: #fecaca !important;
+  background: #fff1f2 !important;
+  color: #991b1b !important;
   font-size: clamp(0.84rem, 0.96vw, 0.96rem) !important;
   font-weight: 950 !important;
+  box-shadow: 0 2px 8px rgba(153, 27, 27, 0.08) !important;
+}
+.wire-layout-bidding .wire-side-panel .cart-clear-button:disabled {
+  border-color: #cbd5e1 !important;
+  background: #f8fafc !important;
+  color: #475569 !important;
+  opacity: 1 !important;
+}
+.wire-layout-bidding .wire-side-panel .cart-remove-button {
+  border: 1px solid #fecaca !important;
+  background: #fff1f2 !important;
+  color: #b91c1c !important;
+  opacity: 1 !important;
+}
+.wire-layout-bidding .wire-side-panel .cart-remove-button svg {
+  stroke-width: 3 !important;
+}
+.wire-layout-bidding .wire-side-panel .cart-remove-button:disabled {
+  border-color: #cbd5e1 !important;
+  background: #f8fafc !important;
+  color: #64748b !important;
+  opacity: 1 !important;
 }
 .wire-layout-bidding .wire-side-panel .saved-disaster-label {
   color: #0f172a !important;

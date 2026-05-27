@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { auth, isAllowedDocChulaEmail } from '@/auth'
 import { canOAuthViewForm, type OAuthFormProfile } from '@/lib/formPermissions'
-import { mergeFormLiveIntoStates } from '@/lib/formLive'
+import { mergeFormLiveIntoStates, publishFullFormState } from '@/lib/formLive'
 import { callGas } from '@/lib/gas'
 import type { ScoringFormState } from '@/lib/forms'
 
@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 export async function POST(req: Request) {
-  let payload: { password?: string; formKeys?: string[]; oauth?: boolean }
+  let payload: { password?: string; formKeys?: string[]; oauth?: boolean; force?: boolean }
   try {
     payload = await req.json()
   } catch {
@@ -34,10 +34,14 @@ export async function POST(req: Request) {
         action: 'readFormStatesOAuth',
         email,
         formKeys: requestedKeys,
+        force: payload.force === true,
       })
       const visibleStates = Object.fromEntries(
         Object.entries(data.states ?? {}).filter(([, state]) => canOAuthViewForm(data.profile, state.form)),
       )
+      if (payload.force === true) {
+        await Promise.all(Object.values(visibleStates).map(state => publishFullFormState(state)))
+      }
       const states = await mergeFormLiveIntoStates(visibleStates)
       return NextResponse.json({ ok: true, states, errors: data.errors ?? {} })
     }
@@ -50,7 +54,11 @@ export async function POST(req: Request) {
       action: 'readFormStates',
       password: payload.password ?? '',
       formKeys: payload.formKeys ?? [],
+      force: payload.force === true,
     })
+    if (payload.force === true) {
+      await Promise.all(Object.values(data.states ?? {}).map(state => publishFullFormState(state)))
+    }
     const states = await mergeFormLiveIntoStates(data.states ?? {})
     return NextResponse.json({ ok: true, states, errors: data.errors ?? {} })
   } catch (error) {
