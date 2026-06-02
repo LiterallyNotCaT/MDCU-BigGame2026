@@ -6222,3 +6222,130 @@ body.fullscreen-fallback-open {
   transform: translateY(-1px);
   background: #fff;
 }
+
+/* ── King's Topbar Styling ─────────────────────────────────── */
+.wire-topbar.is-king {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(100deg, #a87f16 0%, #d4a325 35%, #f7d070 50%, #d4a325 65%, #a87f16 100%) !important;
+  border-bottom: 2px solid #f3c242;
+  box-shadow: 0 8px 32px rgba(212, 163, 37, 0.35);
+}
+.wire-topbar.is-king::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
+  transform: skewX(-20deg) translateX(-150%);
+  animation: topbarSheen 6s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes topbarSheen {
+  0%, 70%, 100% { transform: skewX(-20deg) translateX(-150%); }
+  85% { transform: skewX(-20deg) translateX(150%); }
+}
+.wire-topbar.is-king .wire-title,
+.wire-topbar.is-king .wire-time,
+.wire-topbar.is-king .home-button span,
+.wire-topbar.is-king .home-button svg {
+  text-shadow: 0 1.5px 4px rgba(0, 0, 0, 0.8) !important;
+}
+.wire-topbar.is-king .home-button {
+  background: rgba(0, 0, 0, 0.25) !important;
+  border-color: rgba(255, 255, 255, 0.15) !important;
+}
+.wire-topbar.is-king .home-button:hover {
+  background: rgba(0, 0, 0, 0.4) !important;
+  border-color: rgba(255, 255, 255, 0.3) !important;
+}
+
+/* ── Premium Timer Capsule Styling ────────────────────────── */
+.timer-capsule {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.72) !important;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25), inset 0 1px 1px rgba(255, 255, 255, 0.1);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  border: 1.5px solid rgba(255, 255, 255, 0.08) !important;
+  font-size: clamp(0.95rem, 1.2vw, 1.15rem) !important;
+}
+
+/* Standby State */
+.wire-topbar .timer-capsule.is-standby {
+  border-color: rgba(148, 163, 184, 0.25) !important;
+  color: #94a3b8 !important;
+  text-shadow: none !important;
+}
+.wire-topbar .timer-capsule.is-standby .timer-status-dot {
+  background-color: #64748b !important;
+  box-shadow: 0 0 6px rgba(100, 116, 139, 0.5) !important;
+}
+
+/* Active State */
+.wire-topbar .timer-capsule.is-active {
+  border-color: rgba(34, 211, 238, 0.45) !important;
+  color: #22d3ee !important;
+  text-shadow: 0 0 12px rgba(34, 211, 238, 0.55) !important;
+  box-shadow: 0 4px 14px rgba(34, 211, 238, 0.2), 0 2px 4px rgba(0, 0, 0, 0.25) !important;
+}
+.wire-topbar .timer-capsule.is-active .timer-status-dot {
+  background-color: #22d3ee !important;
+  box-shadow: 0 0 8px rgba(34, 211, 238, 0.8) !important;
+}
+
+/* Urgent State */
+.wire-topbar .timer-capsule.is-urgent {
+  border-color: rgba(248, 113, 113, 0.55) !important;
+  color: #f87171 !important;
+  text-shadow: 0 0 12px rgba(239, 68, 68, 0.65) !important;
+  box-shadow: 0 4px 16px rgba(239, 68, 68, 0.3), 0 2px 4px rgba(0, 0, 0, 0.25) !important;
+  animation: timerCapsulePulseUrgent 1.2s ease-in-out infinite !important;
+}
+.wire-topbar .timer-capsule.is-urgent .timer-status-dot {
+  background-color: #ef4444 !important;
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.95) !important;
+}
+
+/* Expired State */
+.wire-topbar .timer-capsule.is-expired {
+  border-color: rgba(239, 68, 68, 0.6) !important;
+  color: #ef4444 !important;
+  text-shadow: 0 0 10px rgba(239, 68, 68, 0.5) !important;
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2), 0 2px 4px rgba(0, 0, 0, 0.25) !important;
+  animation: timerCapsulePulseExpired 1.5s ease-in-out infinite !important;
+}
+.wire-topbar .timer-capsule.is-expired .timer-status-dot {
+  background-color: #dc2626 !important;
+  box-shadow: 0 0 10px rgba(220, 38, 38, 0.9) !important;
+}
+
+@keyframes timerCapsulePulseUrgent {
+  0%, 100% {
+    box-shadow: 0 4px 16px rgba(239, 68, 68, 0.25), 0 2px 4px rgba(0, 0, 0, 0.25) !important;
+    border-color: rgba(248, 113, 113, 0.45) !important;
+    background: rgba(15, 23, 42, 0.72) !important;
+  }
+  50% {
+    box-shadow: 0 4px 24px rgba(239, 68, 68, 0.5), 0 2px 4px rgba(0, 0, 0, 0.25) !important;
+    border-color: rgba(248, 113, 113, 0.75) !important;
+    background: rgba(239, 68, 68, 0.18) !important;
+  }
+}
+
+@keyframes timerCapsulePulseExpired {
+  0%, 100% {
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2), 0 2px 4px rgba(0, 0, 0, 0.25) !important;
+    background: rgba(15, 23, 42, 0.72) !important;
+  }
+  50% {
+    box-shadow: 0 4px 16px rgba(239, 68, 68, 0.35), 0 2px 4px rgba(0, 0, 0, 0.25) !important;
+    background: rgba(220, 38, 38, 0.22) !important;
+  }
+}
+
+

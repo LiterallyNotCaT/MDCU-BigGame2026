@@ -54,17 +54,19 @@ export default function Timer({ endTime, isOpen, onExpire, compact }: TimerProps
 
   if (compact) {
     return (
-      <div className={clsx(
-        'font-mono text-xl font-bold tracking-widest',
-        colorClass,
-        urgent && 'timer-urgent'
-      )}
-        style={active ? {
-          textShadow: urgent
-            ? '0 0 16px rgba(239,68,68,0.78)'
-            : '0 0 16px rgba(34,211,238,0.6)'
-        } : undefined}>
-        {!isOpen ? 'STANDBY' : expired ? 'TIME UP' : display}
+      <div 
+        className={clsx(
+          'timer-capsule flex items-center gap-2 font-mono font-bold tracking-widest transition-all duration-300',
+          !isOpen && 'is-standby',
+          isOpen && expired && 'is-expired',
+          isOpen && !expired && urgent && 'is-urgent',
+          isOpen && !expired && !urgent && 'is-active'
+        )}
+      >
+        <span className="timer-status-dot w-2 h-2 rounded-full shrink-0" />
+        <span className="timer-text">
+          {!isOpen ? 'STANDBY' : expired ? 'TIME UP' : display}
+        </span>
       </div>
     )
   }

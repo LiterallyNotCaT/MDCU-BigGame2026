@@ -866,7 +866,7 @@ function BiddingGame({ baan }: { baan:number }) {
           </div>
         )}
       </div>
-      <header className="wire-topbar">
+      <header className={clsx('wire-topbar', currentKing === baan && 'is-king')}>
         <div className="flex items-center gap-8">
           <HomeButton className="bg-white/10 border-white/20 text-white hover:text-white" />
           <div className="wire-title">ลงทุนเกาะรอบที่ {gs.currentWave}</div>
