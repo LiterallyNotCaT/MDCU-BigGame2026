@@ -123,10 +123,14 @@ export default function HistoryPanel({
                   const meta = TYPE_META[entry.type]
                   const Icon = meta.icon
                   const amountTone = entry.amount > 0 ? 'is-gain' : entry.amount < 0 ? 'is-loss' : 'is-zero'
-                  const showBetReturnRanking = entry.wave !== undefined && entry.label.startsWith('Bet return')
+                  const showBetReturnRanking = entry.wave !== undefined && (
+                    entry.label.startsWith('Bet return') ||
+                    entry.label.startsWith('ผลตอบแทน เกมแทงม้า')
+                  )
                   const showLadderRanking = entry.wave !== undefined && (
                     entry.label === 'บันไดงู' ||
-                    entry.label === 'เกมพลิกเกม - บันไดงูพิสดาร'
+                    entry.label === 'เกมพลิกเกม - บันไดงูพิสดาร' ||
+                    entry.label === 'เงินได้ จากคนพลิกเกม (บันไดงูพิสดาร)'
                   )
                   const isHighlightedReveal = entry.revealResult && entry.wave === highlightedRevealWave
                   const highlightStyle = isHighlightedReveal

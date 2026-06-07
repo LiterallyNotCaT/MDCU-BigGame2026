@@ -338,7 +338,7 @@ function FinanceHistory({
           latestBalance = startingBalance
           nextEntries.push({
             order: 0,
-            label: 'Morning score',
+            label: 'เงินสุทธิ จากเกมเช้า',
             amount: startingBalance,
             type: startingBalance >= 0 ? 'income' : 'lose',
           })
@@ -373,7 +373,7 @@ function FinanceHistory({
           nextEntries.push({
             order: wave * 100 + 10,
             wave,
-            label: 'Bet',
+            label: 'ลงเงิน เกมแทงม้า',
             detail: !isNaN(betHouseNumber) ? `แทงบ้าน ${betHouseNumber}` : undefined,
             amount: -betAmountSheet,
             type: 'bet',
@@ -386,7 +386,7 @@ function FinanceHistory({
           nextEntries.push({
             order: wave * 100 + 20,
             wave,
-            label: 'King bid',
+            label: 'ลงทุนประมูล วิหาร King',
             amount: -kingAmount,
             type: 'bet',
           })
@@ -430,7 +430,7 @@ function FinanceHistory({
           nextEntries.push({
             order: wave * 100 + 30,
             wave,
-            label: 'Island bid',
+            label: 'ลงทุนประมูล พื้นที่',
             detail: islandBidLines.join('\n'),
             amount: -islandSpentTotal,
             type: 'bet',
@@ -459,10 +459,10 @@ function FinanceHistory({
         const eventAmount = numberAt(19)
         const eventRank = revealWave && eventAmount ? await fetchEventRank(wave, selectedBaan) : null
         const extras = [
-          { label: 'MiniGame', amount: numberAt(17) },
-          { label: 'MoneyDrop', amount: numberAt(18) },
+          { label: 'เงินได้ จากนักเล่นเกมเดี่ยว (Board Game)', amount: numberAt(17) },
+          { label: 'เงินได้ จากนักเล่นเกมทีม (Money Drop)', amount: numberAt(18) },
           {
-            label: eventRank ? `Event · ตอบถูกเป็นลำดับที่ ${eventRank}` : 'Event',
+            label: eventRank ? `เงินโบนัส จาก Event (ตอบถูกเป็นลำดับที่ ${eventRank})` : 'เงินโบนัส จาก Event',
             amount: eventAmount,
           },
         ].filter(x => x.amount)
@@ -479,7 +479,7 @@ function FinanceHistory({
           nextEntries.push({
             order: wave * 100 + 45,
             wave,
-            label: 'บันไดงู',
+            label: 'เงินได้ จากคนพลิกเกม (บันไดงูพิสดาร)',
             amount: ladderAmount,
             type: 'income',
             revealResult: isCurrentWave,
@@ -489,19 +489,19 @@ function FinanceHistory({
         if (revealWave) {
           const resultEntries = [
             {
-              label: 'Total Occupation Bonus',
+              label: 'เงินโบนัส ครอบครองพื้นที่',
               detail: '+10000/occupied area',
               amount: totalOccupationBonus,
               order: wave * 100 + 43.2,
             },
             {
-              label: 'Current king gain',
-              detail: 'จาก 50% ของเงินประมูลชนะใน disasater-ed area',
+              label: 'เงินได้ จากพื้นที่ที่โดนภัยพิบัติ',
+              detail: 'จาก 50% ของเงินที่ประมูลชนะในพื่นที่ที่คุณทำลาย',
               amount: currentKingGain,
               order: wave * 100 + 44,
             },
             {
-              label: 'Bonus island',
+              label: 'เงินโบนัส เกาะพิเศษ (Money Drop)',
               detail: bonusIslandNames
                 ? `From Money Drop\nBonus Island : ${bonusIslandNames}`
                 : 'From Money Drop',
@@ -509,7 +509,7 @@ function FinanceHistory({
               order: wave * 100 + 46,
             },
             {
-              label: 'Honesty',
+              label: 'เงินโบนัส จากนักทูต (คุณพูดความจริง!)',
               detail: '+1000/พื้นที่ ถ้าลงทุนตามที่สัญญาในห้องทูต',
               amount: honestyAmount,
               order: wave * 100 + 47,
@@ -541,7 +541,7 @@ function FinanceHistory({
             nextEntries.push({
               order: wave * 100 + 49,
               wave,
-              label: 'Disowned Area Group',
+              label: 'พื้นที่ของคุณโดนภัยพิบัติจาก King!',
               detail: disownedGroup,
               amount: 0,
               type: 'disaster',
@@ -556,7 +556,7 @@ function FinanceHistory({
           nextEntries.push({
             order: wave * 100 + 60,
             wave,
-            label: `Bet return: +${formatPercent(betReturn, betAmountSheet)}`,
+            label: `ผลตอบแทน เกมแทงม้า: +${formatPercent(betReturn, betAmountSheet)}`,
             amount: betReturn,
             type: betReturn > 0 ? 'reward' : 'lose',
             betTarget: !isNaN(parsedBetTarget) ? parsedBetTarget : undefined,
@@ -567,7 +567,7 @@ function FinanceHistory({
           nextEntries.push({
             order: wave * 100 + 70,
             wave,
-            label: 'Island return',
+            label: 'ผลตอบแทน จากการลงทุนพื้นที่',
             detailLines: islandReturnLines,
             amount: islandReturnTotal,
             type: islandReturnTotal > 0 ? 'income' : 'lose',
@@ -585,7 +585,7 @@ function FinanceHistory({
           nextEntries.push({
             order: wave * 100 + 80,
             wave,
-            label: 'King result',
+            label: 'ผลการประมูล วิหาร King',
             detail: kingDetail,
             amount: kingResultAmount,
             type: wonKing ? 'reward' : 'lose',
