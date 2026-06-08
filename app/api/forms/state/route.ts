@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { mergeFormLiveIntoState, publishFullFormState } from '@/lib/formLive'
 import { callGas } from '@/lib/gas'
-import type { ScoringFormState } from '@/lib/forms'
+import { normalizeScoringFormState, type ScoringFormState } from '@/lib/forms'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -20,10 +20,11 @@ export async function POST(req: Request) {
       formKey: payload.formKey ?? '',
       force: payload.force === true,
     })
+    const normalizedState = normalizeScoringFormState(data.state)
     if (payload.force === true) {
-      await publishFullFormState(data.state)
+      await publishFullFormState(normalizedState)
     }
-    const state = await mergeFormLiveIntoState(data.state)
+    const state = await mergeFormLiveIntoState(normalizedState)
     return NextResponse.json({ ok: true, state })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

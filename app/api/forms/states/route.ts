@@ -3,7 +3,7 @@ import { auth, isAllowedDocChulaEmail } from '@/auth'
 import { canOAuthViewForm, type OAuthFormProfile } from '@/lib/formPermissions'
 import { mergeFormLiveIntoStates, publishFullFormState } from '@/lib/formLive'
 import { callGas } from '@/lib/gas'
-import type { ScoringFormState } from '@/lib/forms'
+import { normalizeScoringFormState, type ScoringFormState } from '@/lib/forms'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -37,7 +37,9 @@ export async function POST(req: Request) {
         force: payload.force === true,
       })
       const visibleStates = Object.fromEntries(
-        Object.entries(data.states ?? {}).filter(([, state]) => canOAuthViewForm(data.profile, state.form)),
+        Object.entries(data.states ?? {})
+          .map(([key, state]) => [key, normalizeScoringFormState(state)] as const)
+          .filter(([, state]) => canOAuthViewForm(data.profile, state.form)),
       )
       if (payload.force === true) {
         await Promise.all(Object.values(visibleStates).map(state => publishFullFormState(state)))
@@ -57,9 +59,12 @@ export async function POST(req: Request) {
       force: payload.force === true,
     })
     if (payload.force === true) {
-      await Promise.all(Object.values(data.states ?? {}).map(state => publishFullFormState(state)))
+      await Promise.all(Object.values(data.states ?? {}).map(state => publishFullFormState(normalizeScoringFormState(state))))
     }
-    const states = await mergeFormLiveIntoStates(data.states ?? {})
+    const normalizedStates = Object.fromEntries(
+      Object.entries(data.states ?? {}).map(([key, state]) => [key, normalizeScoringFormState(state)] as const),
+    )
+    const states = await mergeFormLiveIntoStates(normalizedStates)
     return NextResponse.json({ ok: true, states, errors: data.errors ?? {} })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

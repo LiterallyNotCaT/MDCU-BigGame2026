@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { callGas } from '@/lib/gas'
 import { cacheFormAdminPassword } from '@/lib/formAdminAuthCache'
 import { mergeFormLiveIntoState } from '@/lib/formLive'
-import type { ScoringFormAuth } from '@/lib/forms'
+import { normalizeScoringFormState, type ScoringFormAuth } from '@/lib/forms'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -25,7 +25,7 @@ export async function POST(req: Request) {
     if (payload.admin === true && data.ok) {
       await cacheFormAdminPassword(payload.password ?? '')
     }
-    const state = data.state ? await mergeFormLiveIntoState(data.state) : data.state
+    const state = data.state ? await mergeFormLiveIntoState(normalizeScoringFormState(data.state)) : data.state
     return NextResponse.json({ ...data, state })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

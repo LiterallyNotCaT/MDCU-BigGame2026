@@ -63,7 +63,7 @@ async function mergeLive(state: MoneyDropSpecialState) {
       if (!liveRound) return round
       return {
         ...round,
-        value: liveRound.values?.[0] ?? round.value,
+        value: liveRound.saving === true ? liveRound.values?.[0] ?? round.value : round.value,
         confirmed: liveRound.confirmed === true,
         locked: liveRound.locked === true,
         saving: liveRound.saving === true,

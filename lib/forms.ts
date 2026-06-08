@@ -65,7 +65,7 @@ export function inferFormKind(
 ): Pick<ScoringFormConfig, 'kind' | 'defaultFillToRank' | 'allowTies' | 'blank' | 'rankCount' | 'maxRounds' | 'usesAutoRemainder' | 'autoAfterHouseCount'> {
   const normalized = user.toLowerCase().replace(/\s+/g, ' ').trim()
   if (normalized === 'money drop') {
-    return { kind: 'score-number', defaultFillToRank: 1, allowTies: false, blank: false, rankCount: 12, maxRounds: 4, usesAutoRemainder: false, autoAfterHouseCount: 0 }
+    return { kind: 'score-number', defaultFillToRank: 1, allowTies: false, blank: false, rankCount: 12, maxRounds: 2, usesAutoRemainder: false, autoAfterHouseCount: 0 }
   }
   if (normalized === 'snake ladder') {
     return { kind: 'score-unsigned', defaultFillToRank: 1, allowTies: false, blank: false, rankCount: 12, maxRounds: 4, usesAutoRemainder: false, autoAfterHouseCount: 0 }
@@ -85,6 +85,24 @@ export function inferFormKind(
       : { kind: 'ranking-single', defaultFillToRank: 4, allowTies: false, blank: false, rankCount: 4, maxRounds: 6, usesAutoRemainder: false, autoAfterHouseCount: 0 }
   }
   return { kind: 'ranking-group', defaultFillToRank: 3, allowTies: true, blank: false, rankCount: 4, maxRounds: tab === 'เช้าบน' ? 4 : 0, usesAutoRemainder: true, autoAfterHouseCount: 3 }
+}
+
+export function normalizeScoringFormConfig(form: ScoringFormConfig): ScoringFormConfig {
+  return {
+    ...form,
+    ...inferFormKind(form.tab, form.user),
+  }
+}
+
+export function normalizeScoringFormState(state: ScoringFormState): ScoringFormState {
+  const form = normalizeScoringFormConfig(state.form)
+  const maxRounds = form.maxRounds || state.rounds.length
+  return {
+    ...state,
+    form,
+    rounds: state.rounds.slice(0, maxRounds),
+    values: state.values.map(row => row.slice(0, maxRounds)),
+  }
 }
 
 export function parseHouseList(value: unknown) {

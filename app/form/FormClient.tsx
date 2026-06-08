@@ -292,6 +292,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
   const didRouteOauthProfile = useRef(false)
   const adminPreloadedTabs = useRef<Set<string>>(new Set())
   const liveVersionByForm = useRef<Record<string, number>>({})
+  const sheetFreshLoadedForms = useRef<Set<string>>(new Set())
   const dirtyRoundsByForm = useRef<Record<string, Set<number>>>({})
   const submittingRoundsByForm = useRef<Record<string, Set<number>>>({})
   const dirtyMoneyDropRoundsByLiveKey = useRef<Record<string, Set<number>>>({})
@@ -646,6 +647,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
         const selectedState = loadedStates[nextFormKey]
         if (selectedState) {
           applyFormState(selectedState)
+          if (options?.force === true) sheetFreshLoadedForms.current.add(nextFormKey)
         } else {
           setState(null)
           setDraft([])
@@ -661,6 +663,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
         const selectedState = loadedStates[nextFormKey]
         if (selectedState) {
           applyFormState(selectedState)
+          if (options?.force === true) sheetFreshLoadedForms.current.add(nextFormKey)
         } else {
           setState(null)
           setDraft([])
@@ -673,6 +676,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
         body: JSON.stringify({ formKey: nextFormKey, force: options?.force === true }),
       })
       applyFormState(data.state)
+      if (options?.force === true) sheetFreshLoadedForms.current.add(nextFormKey)
       setStatesByFormKey(prev => ({ ...prev, [nextFormKey]: data.state }))
     } catch (error) {
       const message = error instanceof Error
@@ -706,8 +710,9 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
   useEffect(() => {
     if (!formKey) return
     if (canLoadSelectedForm) {
-      if (currentState?.form.formKey === formKey) return
-      refreshState(formKey)
+      const needsFreshSheetLoad = !sheetFreshLoadedForms.current.has(formKey)
+      if (currentState?.form.formKey === formKey && !needsFreshSheetLoad) return
+      refreshState(formKey, { force: needsFreshSheetLoad })
       return
     }
     setState(null)

@@ -482,7 +482,7 @@ function handleAuthAccess(payload) {
 }
 
 function formConfigCacheKey_(includePasswords) {
-  return `FORM_CONFIG_V12_${includePasswords ? 'private' : 'public'}`
+  return `FORM_CONFIG_V13_${includePasswords ? 'private' : 'public'}`
 }
 
 function formAdminPasswordCacheKey_() {
@@ -490,7 +490,7 @@ function formAdminPasswordCacheKey_() {
 }
 
 function formStateCacheKey_(form) {
-  return `FORM_STATE_V7_${cacheKeyPart_(form.formKey)}`
+  return `FORM_STATE_V8_${cacheKeyPart_(form.formKey)}`
 }
 
 function invalidateFormState_(form) {
@@ -500,7 +500,7 @@ function invalidateFormState_(form) {
 function inferFormMeta_(tab, user) {
   const normalized = String(user || '').toLowerCase().replace(/\s+/g, ' ').trim()
   if (normalized === 'money drop') {
-    return { kind: 'score-number', defaultFillToRank: 1, allowTies: false, blank: false, rankCount: 12, maxRounds: 4, usesAutoRemainder: false, autoAfterHouseCount: 0 }
+    return { kind: 'score-number', defaultFillToRank: 1, allowTies: false, blank: false, rankCount: 12, maxRounds: 2, usesAutoRemainder: false, autoAfterHouseCount: 0 }
   }
   if (normalized === 'snake ladder') {
     return { kind: 'score-unsigned', defaultFillToRank: 1, allowTies: false, blank: false, rankCount: 12, maxRounds: 4, usesAutoRemainder: false, autoAfterHouseCount: 0 }
