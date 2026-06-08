@@ -5,16 +5,31 @@ type GasResponse = {
 }
 
 const GAS_URL = process.env.GAS_URL || process.env.NEXT_PUBLIC_GAS_URL || ''
+const DEFAULT_GAS_TIMEOUT_MS = 25_000
 
 export async function callGas<T = GasResponse>(payload: Record<string, unknown>): Promise<T> {
   if (!GAS_URL) throw new Error('GAS URL not configured')
 
-  const res = await fetch(GAS_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify(payload),
-    cache: 'no-store',
-  })
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), DEFAULT_GAS_TIMEOUT_MS)
+  let res: Response
+
+  try {
+    res = await fetch(GAS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload),
+      cache: 'no-store',
+      signal: controller.signal,
+    })
+  } catch (error) {
+    if ((error as { name?: string })?.name === 'AbortError') {
+      throw new Error('Apps Script request timed out. Please retry.')
+    }
+    throw error
+  } finally {
+    clearTimeout(timeout)
+  }
 
   const text = await res.text()
   let data: T & GasResponse

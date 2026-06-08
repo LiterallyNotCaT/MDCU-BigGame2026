@@ -9,7 +9,7 @@ import GroupChat from '@/components/GroupChat'
 import { useWaveOwnership } from '@/components/OwnershipHistory'
 import Timer from '@/components/Timer'
 import clsx from 'clsx'
-import { Crown, Landmark, LogOut, Sparkles } from 'lucide-react'
+import { CheckCircle2, Crown, Landmark, LogOut, Sparkles } from 'lucide-react'
 import { HOUSE_NAMES, SHEET_ID, getWaveSheetQuery } from '@/lib/constants'
 import {
   getGameState, saveSubmission, getSubmissionsForBaan,
@@ -466,6 +466,12 @@ function BiddingGame({ baan }: { baan:number }) {
     : gs.showResults === true
       ? activeSheetDisaster
       : null
+  const hasBetSheetInput = Boolean(sheetInput?.hasBetInput)
+  const hasConfirmedLocalBetInput = Boolean(savedAt && currentSubmission?.betTarget && currentSubmission?.betAmount)
+  const hasExistingBetInput = hasBetSheetInput || hasConfirmedLocalBetInput
+  const isBetSubmitSaved = isBetMode && isSaved && hasExistingBetInput
+  const isBetSubmitDisabled = !gs.isOpen || isSyncing || !betTarget || !isBetAmountValid || isBetSubmitSaved
+  const betSubmitVerb = hasExistingBetInput ? 'Resubmit' : 'Submit'
 
   useEffect(() => {
     const hydrateKey = `${gs.currentWave}:${baan}:${draftMode}`
@@ -760,10 +766,29 @@ function BiddingGame({ baan }: { baan:number }) {
   const handleSave = useCallback(async (mode: 'manual' | 'auto' = 'manual')=>{
     if(!gs.isOpen && mode !== 'auto') return
     if(isEventMode) return
-    if(mode === 'auto' && isSaved) return
+    const betTargetForSave = isBetMode && mode === 'auto'
+      ? betTarget || String(baan)
+      : betTarget
+    const betTargetNumberForSave = Number.parseInt(betTargetForSave, 10)
+    const hasBetTargetForSave = Number.isFinite(betTargetNumberForSave)
+    const autoBetSpend = isBetMode && mode === 'auto'
+      ? Math.min(balance, Math.max(minBetAmount, Number.isFinite(betAmountNumber) ? betSpend : minBetAmount))
+      : betSpend
+    const betSpendForSave = isBetMode && mode === 'auto' ? autoBetSpend : betSpend
+    const isBetAmountValidForSave = balance > 0
+      && Number.isFinite(betSpendForSave)
+      && betSpendForSave >= minBetAmount
+      && betSpendForSave <= balance
+    if (isBetMode && mode === 'auto' && balance > 0 && betSpendForSave > 0 && betSpendForSave !== betSpend) {
+      setBetAmount(String(betSpendForSave))
+    }
+    if (isBetMode && mode === 'auto' && !betTarget && hasBetTargetForSave) {
+      setBetTarget(String(betTargetNumberForSave))
+    }
+    if(mode === 'auto' && isSaved && !(isBetMode && !hasExistingBetInput)) return
     if(saveInFlight.current) return
     const hasInvalidBidAmount = cart.some(i => !Number.isFinite(i.amount) || i.amount < 100)
-    if(isBetMode && !isBetAmountValid) return
+    if(isBetMode && (!hasBetTargetForSave || !isBetAmountValidForSave)) return
     const canSubmitDisaster = canSelectKingDisaster || (mode === 'auto' && isSelectDisasterPhase && canChooseKingDisaster)
     if(isSelectDisasterPhase && (!canSubmitDisaster || !kingDis)) return
     if(!isBetMode && !isSelectDisasterPhase && (hasInvalidBidAmount || !Number.isFinite(totalBet) || totalBet <= 0 || totalBet > effectiveBalance)) return
@@ -781,10 +806,10 @@ function BiddingGame({ baan }: { baan:number }) {
       bets: isBetMode || isSelectDisasterPhase ? currentSubmission?.bets ?? [] : cart,
       isKing: canChooseKingDisaster,
       kingDisaster: canSubmitDisaster ? kingDis ?? undefined : currentSubmission?.kingDisaster,
-      betTarget: isBetMode && betTarget ? parseInt(betTarget) : currentSubmission?.betTarget,
-      betAmount: isBetMode ? betSpend : currentSubmission?.betAmount,
+      betTarget: isBetMode && hasBetTargetForSave ? betTargetNumberForSave : currentSubmission?.betTarget,
+      betAmount: isBetMode ? betSpendForSave : currentSubmission?.betAmount,
       timestamp,
-      balance: isBetMode ? balance - betSpend : currentSubmission?.balance ?? effectiveBalance,
+      balance: isBetMode ? balance - betSpendForSave : currentSubmission?.balance ?? effectiveBalance,
     })
     if (isSelectDisasterPhase) setActiveDisaster(gs.currentWave, kingDis)
 
@@ -802,8 +827,8 @@ function BiddingGame({ baan }: { baan:number }) {
       action: 'writeWave' as const,
       wave:   gs.currentWave,
       baan,
-      betTarget: isBetMode && betTarget ? parseInt(betTarget) : undefined,
-      betAmount: isBetMode ? betSpend : undefined,
+      betTarget: isBetMode && hasBetTargetForSave ? betTargetNumberForSave : undefined,
+      betAmount: isBetMode ? betSpendForSave : undefined,
       kingAmount: !isBetMode && kingBid ? kingBidAmount : undefined,
       kingDisaster: undefined,
       islands: isBetMode ? undefined : islands,
@@ -833,7 +858,7 @@ function BiddingGame({ baan }: { baan:number }) {
       setIsSaved(false)
       console.error(e)
     })
-  },[baan,cart,gs.currentWave,gs.isOpen,isSaved,canChooseKingDisaster,canSelectKingDisaster,kingDis,balance,totalBet,isBetMode,isEventMode,isSelectDisasterPhase,betTarget,betSpend,isBetAmountValid,fetchBalance,fetchSheetSnapshot,effectiveBalance,currentSubmission,islandCart,kingBid,kingBidAmount,draftKey])
+  },[baan,cart,gs.currentWave,gs.isOpen,isSaved,hasExistingBetInput,canChooseKingDisaster,canSelectKingDisaster,kingDis,balance,minBetAmount,totalBet,isBetMode,isEventMode,isSelectDisasterPhase,betTarget,betAmountNumber,betSpend,fetchBalance,fetchSheetSnapshot,effectiveBalance,currentSubmission,islandCart,kingBid,kingBidAmount,draftKey])
 
   const normalizeBetAmount = () => {
     if (betAmount.trim() === '') return
@@ -898,13 +923,13 @@ function BiddingGame({ baan }: { baan:number }) {
                 {gs.isOpen?'OPEN':'CLOSED'}
               </div>
             </div>
-            {!isBetMode && (
+            {!isEventMode && (
               <div className="ml-auto">
                 <GroupChat actor={baan} />
               </div>
             )}
             <button onClick={()=>{sessionStorage.removeItem('baan_login');sessionStorage.removeItem('baan_login_token');window.location.reload()}}
-              className={clsx('btn btn-ghost', isBetMode && 'wire-bet-logout', isEventMode && 'wire-edge-logout')}>
+              className={clsx('btn btn-ghost', isEventMode && 'wire-edge-logout')}>
               <LogOut size={14} /> Logout
             </button>
           </div>
@@ -969,9 +994,23 @@ function BiddingGame({ baan }: { baan:number }) {
                           </div>
                         </div>
                       </div>
-                      <button onClick={() => { void handleSave('manual') }} disabled={!gs.isOpen || isSyncing || !betTarget || !isBetAmountValid}
-                        className="btn btn-primary sm:col-span-2">
-                        {isSyncing ? (syncReason === 'auto' ? 'Autosaving...' : 'Sending to admin...') : `Submit bet ${betSpend ? `· ${betSpend.toLocaleString()}` : ''}`}
+                      <button onClick={() => { void handleSave('manual') }} disabled={isBetSubmitDisabled}
+                        className={clsx(
+                          'cart-save-button btn sm:col-span-2',
+                          isBetSubmitSaved
+                            ? 'is-saved'
+                            : isBetSubmitDisabled
+                              ? 'opacity-40 cursor-not-allowed bg-slate-800 text-slate-500 border border-transparent'
+                              : 'btn-primary',
+                        )}>
+                        {isSyncing ? (syncReason === 'auto' ? 'Autosaving...' : 'Sending to admin...')
+                          : isBetSubmitSaved ? (
+                            <span className="flex items-center justify-center gap-2">
+                              <CheckCircle2 size={16} />
+                              Saved
+                            </span>
+                          )
+                          : `${betSubmitVerb} bet`}
                       </button>
                       {saveMessage && (
                         <div className="sm:col-span-2 px-2 py-1 text-center text-xs font-semibold text-emerald-700">

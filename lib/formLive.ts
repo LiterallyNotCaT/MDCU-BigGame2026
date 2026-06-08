@@ -30,6 +30,9 @@ type RoundPatch = {
   values?: string[]
 }
 
+const FORM_SUBMIT_CLAIM_TTL_SECONDS = 10 * 60
+const FORM_SUBMIT_STALE_MS = 2 * 60 * 1000
+
 function formLiveKey(formKey: string) {
   return `biggame_form_live:${Buffer.from(String(formKey)).toString('base64url')}`
 }
@@ -124,8 +127,22 @@ export async function claimAndPublishFormRoundSubmit(formKey: string, roundIndex
   const key = String(formKey || '').trim()
   if (!key || !Number.isInteger(roundIndex) || roundIndex < 0) throw new Error('Invalid round')
 
-  const existing = await readFormLiveState(key)
-  const round = existing.rounds[String(roundIndex)]
+  let existing = await readFormLiveState(key)
+  let round = existing.rounds[String(roundIndex)]
+  if (round?.saving && round.updatedAt) {
+    const updatedMs = new Date(round.updatedAt).getTime()
+    if (Number.isFinite(updatedMs) && Date.now() - updatedMs > FORM_SUBMIT_STALE_MS) {
+      await releaseFormRoundSubmitClaim(key, roundIndex)
+      existing = nextLiveStateFromPatches(key, existing, [{
+        index: roundIndex,
+        locked: false,
+        saving: false,
+        error: 'Previous send timed out. Please retry.',
+      }])
+      await redisSetJson(formLiveKey(key), existing)
+      round = existing.rounds[String(roundIndex)]
+    }
+  }
   if (round?.confirmed) throw new Error("Can't send the data as there is already confirmation from another person.")
   if (!isAdmin) {
     if (round?.locked) throw new Error('This round is locked')
@@ -147,7 +164,7 @@ export async function claimFormRoundSubmit(formKey: string, roundIndex: number) 
   return await redisSetJsonIfNotExists(
     formSubmitClaimKey(key, roundIndex),
     { formKey: key, roundIndex, claimedAt: new Date().toISOString() },
-    12 * 60 * 60,
+    FORM_SUBMIT_CLAIM_TTL_SECONDS,
   )
 }
 

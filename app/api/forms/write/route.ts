@@ -43,6 +43,7 @@ export async function POST(req: Request) {
         saving: true,
         error: '',
         participants: String(payload.participants ?? ''),
+        values,
       })
 
       let email = ''

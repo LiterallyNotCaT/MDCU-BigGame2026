@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 import clsx from 'clsx'
 import { signOut } from 'next-auth/react'
 import { CheckCircle2, Clock, Eye, FileSpreadsheet, KeyRound, Lock, LogOut, RefreshCw, Send, ShieldCheck, Unlock } from 'lucide-react'
@@ -292,6 +292,10 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
   const didRouteOauthProfile = useRef(false)
   const adminPreloadedTabs = useRef<Set<string>>(new Set())
   const liveVersionByForm = useRef<Record<string, number>>({})
+  const dirtyRoundsByForm = useRef<Record<string, Set<number>>>({})
+  const submittingRoundsByForm = useRef<Record<string, Set<number>>>({})
+  const dirtyMoneyDropRoundsByLiveKey = useRef<Record<string, Set<number>>>({})
+  const submittingMoneyDropRoundsByLiveKey = useRef<Record<string, Set<number>>>({})
   const grouped = useMemo(() => groupByTab(forms), [forms])
   const currentForms = grouped[tab] ?? []
   const currentForm = forms.find(form => form.formKey === formKey) ?? currentForms[0] ?? null
@@ -333,12 +337,51 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     window.setTimeout(() => setNotice(null), 4200)
   }
 
+  const markRoundInRef = (ref: MutableRefObject<Record<string, Set<number>>>, key: string, roundIndex: number) => {
+    if (!key || !Number.isInteger(roundIndex)) return
+    const existing = ref.current[key] ?? new Set<number>()
+    existing.add(roundIndex)
+    ref.current[key] = existing
+  }
+
+  const clearRoundInRef = (ref: MutableRefObject<Record<string, Set<number>>>, key: string, roundIndex: number) => {
+    const existing = ref.current[key]
+    if (!existing) return
+    existing.delete(roundIndex)
+    if (!existing.size) delete ref.current[key]
+  }
+
+  const isRoundInRef = (ref: MutableRefObject<Record<string, Set<number>>>, key: string, roundIndex: number) => (
+    ref.current[key]?.has(roundIndex) === true
+  )
+
   const applyLiveState = useCallback((live: FormLiveState) => {
     if (!live?.formKey || !live.version || !live.rounds) return
     liveVersionByForm.current[live.formKey] = Math.max(liveVersionByForm.current[live.formKey] ?? 0, live.version)
+    Object.entries(live.rounds).forEach(([roundKey, liveRound]) => {
+      const roundIndex = Number(roundKey)
+      if (!Number.isInteger(roundIndex)) return
+      if (liveRound.confirmed) {
+        clearRoundInRef(dirtyRoundsByForm, live.formKey, roundIndex)
+        clearRoundInRef(submittingRoundsByForm, live.formKey, roundIndex)
+      } else if (!liveRound.saving && liveRound.error) {
+        clearRoundInRef(submittingRoundsByForm, live.formKey, roundIndex)
+      }
+    })
+    const shouldUseLiveValues = (roundIndex: number, liveRound: FormLiveState['rounds'][string] | undefined) => (
+      Boolean(liveRound)
+      && (
+        liveRound?.confirmed === true
+        || (
+          !isRoundInRef(dirtyRoundsByForm, live.formKey, roundIndex)
+          && !isRoundInRef(submittingRoundsByForm, live.formKey, roundIndex)
+        )
+      )
+    )
     const mergeValues = (values: ScoringFormState['values']) => values.map((row, rowIndex) => row.map((cell, columnIndex) => {
-      const liveValues = live.rounds[String(columnIndex)]?.values
-      return Array.isArray(liveValues) && rowIndex < liveValues.length ? liveValues[rowIndex] : cell
+      const liveRound = live.rounds[String(columnIndex)]
+      const liveValues = liveRound?.values
+      return Array.isArray(liveValues) && rowIndex < liveValues.length && shouldUseLiveValues(columnIndex, liveRound) ? liveValues[rowIndex] : cell
     }))
     const mergeRounds = (rounds: ScoringFormState['rounds']) => rounds.map((round, index) => {
       const liveRound = live.rounds[String(index)]
@@ -376,14 +419,38 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
       }
     })
     setDraft(prev => prev.map((row, rowIndex) => row.map((cell, columnIndex) => {
-      const liveValues = live.rounds[String(columnIndex)]?.values
-      return Array.isArray(liveValues) && rowIndex < liveValues.length ? liveValues[rowIndex] : cell
+      const liveRound = live.rounds[String(columnIndex)]
+      const liveValues = liveRound?.values
+      return Array.isArray(liveValues) && rowIndex < liveValues.length && shouldUseLiveValues(columnIndex, liveRound) ? liveValues[rowIndex] : cell
     })))
-    setParticipantsByRound(prev => prev.map((value, index) => live.rounds[String(index)]?.participants || value))
+    setParticipantsByRound(prev => prev.map((value, index) => {
+      const liveRound = live.rounds[String(index)]
+      return liveRound?.participants && shouldUseLiveValues(index, liveRound) ? liveRound.participants : value
+    }))
   }, [])
 
   const applyMoneyDropSpecialLive = useCallback((live: FormLiveState) => {
     if (!live?.formKey || !live.version || !live.rounds) return
+    Object.entries(live.rounds).forEach(([roundKey, liveRound]) => {
+      const roundIndex = Number(roundKey)
+      if (!Number.isInteger(roundIndex)) return
+      if (liveRound.confirmed) {
+        clearRoundInRef(dirtyMoneyDropRoundsByLiveKey, live.formKey, roundIndex)
+        clearRoundInRef(submittingMoneyDropRoundsByLiveKey, live.formKey, roundIndex)
+      } else if (!liveRound.saving && liveRound.error) {
+        clearRoundInRef(submittingMoneyDropRoundsByLiveKey, live.formKey, roundIndex)
+      }
+    })
+    const shouldUseLiveValues = (roundIndex: number, liveRound: FormLiveState['rounds'][string] | undefined) => (
+      Boolean(liveRound)
+      && (
+        liveRound?.confirmed === true
+        || (
+          !isRoundInRef(dirtyMoneyDropRoundsByLiveKey, live.formKey, roundIndex)
+          && !isRoundInRef(submittingMoneyDropRoundsByLiveKey, live.formKey, roundIndex)
+        )
+      )
+    )
     setMoneyDropSpecial(prev => {
       if (!prev || prev.liveKey !== live.formKey) return prev
       return {
@@ -393,7 +460,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
           if (!liveRound) return round
           return {
             ...round,
-            value: liveRound.values?.[0] ?? round.value,
+            value: shouldUseLiveValues(round.index, liveRound) ? liveRound.values?.[0] ?? round.value : round.value,
             confirmed: liveRound.confirmed === true,
             locked: liveRound.locked === true,
             saving: liveRound.saving === true,
@@ -402,7 +469,10 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
         }),
       }
     })
-    setMoneyDropSpecialDraft(prev => prev.map((value, index) => live.rounds[String(index)]?.values?.[0] ?? value))
+    setMoneyDropSpecialDraft(prev => prev.map((value, index) => {
+      const liveRound = live.rounds[String(index)]
+      return shouldUseLiveValues(index, liveRound) ? liveRound?.values?.[0] ?? value : value
+    }))
   }, [])
 
   const refreshConfig = useCallback(async () => {
@@ -442,6 +512,8 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
   const applyFormState = useCallback((nextState: ScoringFormState) => {
     setStateLoadError('')
     setLoadingState(false)
+    delete dirtyRoundsByForm.current[nextState.form.formKey]
+    delete submittingRoundsByForm.current[nextState.form.formKey]
     setState(nextState)
     setDraft(blankDraft(nextState))
     setFillToRank(clampFillToRank(nextState.fillToRank || nextState.form.defaultFillToRank))
@@ -746,6 +818,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
   }
 
   const updateCell = (rowIndex: number, roundIndex: number, value: string) => {
+    if (currentState?.form.formKey) markRoundInRef(dirtyRoundsByForm, currentState.form.formKey, roundIndex)
     setDraft(prev => prev.map((row, r) => r === rowIndex
       ? row.map((cell, c) => c === roundIndex ? value : cell)
       : row
@@ -753,6 +826,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
   }
 
   const updateParticipants = (roundIndex: number, value: string) => {
+    if (currentState?.form.formKey) markRoundInRef(dirtyRoundsByForm, currentState.form.formKey, roundIndex)
     setParticipantsByRound(prev => prev.map((cell, index) => index === roundIndex ? value : cell))
   }
 
@@ -764,6 +838,8 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
         method: 'POST',
         body: JSON.stringify({ action: 'read', formKey: nextFormKey }),
       })
+      delete dirtyMoneyDropRoundsByLiveKey.current[data.state.liveKey]
+      delete submittingMoneyDropRoundsByLiveKey.current[data.state.liveKey]
       setMoneyDropSpecial(data.state)
       setMoneyDropSpecialDraft(data.state.rounds.map(round => round.value || ''))
     } catch (error) {
@@ -774,6 +850,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
   }, [currentState?.form.formKey])
 
   const updateMoneyDropSpecialDraft = (roundIndex: number, value: string) => {
+    if (moneyDropSpecial?.liveKey) markRoundInRef(dirtyMoneyDropRoundsByLiveKey, moneyDropSpecial.liveKey, roundIndex)
     setMoneyDropSpecialDraft(prev => prev.map((item, index) => index === roundIndex ? value : item))
   }
 
@@ -799,6 +876,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     }
     if (!window.confirm('Do you confirm? Please check this Money Drop special input before sending.')) return
 
+    markRoundInRef(submittingMoneyDropRoundsByLiveKey, moneyDropSpecial.liveKey, roundIndex)
     setMoneyDropSpecialSaving(prev => new Set(prev).add(roundIndex))
     setMoneyDropSpecialDraft(prev => prev.map((item, index) => index === roundIndex ? value : item))
     setMoneyDropSpecial(prev => prev ? {
@@ -818,9 +896,14 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
           value,
         }),
       })
+      if (!response.queued) {
+        clearRoundInRef(dirtyMoneyDropRoundsByLiveKey, moneyDropSpecial.liveKey, roundIndex)
+        clearRoundInRef(submittingMoneyDropRoundsByLiveKey, moneyDropSpecial.liveKey, roundIndex)
+      }
       notify('ok', response.message || 'Sending to sheet...')
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
+      clearRoundInRef(submittingMoneyDropRoundsByLiveKey, moneyDropSpecial.liveKey, roundIndex)
       setMoneyDropSpecial(prev => prev ? {
         ...prev,
         rounds: prev.rounds.map(item => item.index === roundIndex ? { ...item, locked: false, saving: false, error: message } : item),
@@ -858,6 +941,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     }
     if (!window.confirm('Do you confirm? Please check the information carefully before sending.')) return
 
+    markRoundInRef(submittingRoundsByForm, currentState.form.formKey, roundIndex)
     setSavingRounds(prev => {
       const next = new Set(prev)
       next.add(roundIndex)
@@ -917,6 +1001,8 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
         notify('ok', response.message || 'Sending to sheet...')
         return
       }
+      clearRoundInRef(dirtyRoundsByForm, currentState.form.formKey, roundIndex)
+      clearRoundInRef(submittingRoundsByForm, currentState.form.formKey, roundIndex)
       setState(prev => {
         if (!prev || prev.form.formKey !== currentState.form.formKey) return prev
         return {
@@ -952,6 +1038,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
       notify('ok', `Saved ${round.label}`)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
+      clearRoundInRef(submittingRoundsByForm, currentState.form.formKey, roundIndex)
       setState(prev => {
         if (!prev || prev.form.formKey !== currentState.form.formKey) return prev
         return {
