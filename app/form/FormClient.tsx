@@ -50,6 +50,7 @@ type FormLiveState = {
     deadlineAt: string
     participants: string
     values: string[]
+    updatedAt: string
   }>
 }
 
@@ -72,6 +73,13 @@ type MoneyDropSpecialState = {
 
 const FORM_TABS = ['เช้าล่าง', 'เช้าบน', 'Games บ่าย']
 const FORM_SESSION_STORAGE_KEY = 'biggame_form_sessions_v1'
+const FORM_LIVE_CLIENT_MAX_AGE_MS = 2 * 60 * 1000
+
+function isFreshLiveRound(round: FormLiveState['rounds'][string] | undefined) {
+  if (!round?.updatedAt) return false
+  const updatedMs = new Date(round.updatedAt).getTime()
+  return Number.isFinite(updatedMs) && Date.now() - updatedMs <= FORM_LIVE_CLIENT_MAX_AGE_MS
+}
 
 type StoredFormSession = {
   sessions: Record<string, Session>
@@ -378,6 +386,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     })
     const shouldUseLiveValues = (roundIndex: number, liveRound: FormLiveState['rounds'][string] | undefined) => (
       Boolean(liveRound)
+      && isFreshLiveRound(liveRound)
       && (
         liveRound?.confirmed === true
         || (
@@ -394,6 +403,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     const mergeRounds = (rounds: ScoringFormState['rounds']) => rounds.map((round, index) => {
       const liveRound = live.rounds[String(index)]
       if (!liveRound) return round
+      if (!isFreshLiveRound(liveRound)) return round
       if (
         round.confirmed === liveRound.confirmed
         && round.locked === liveRound.locked
@@ -451,6 +461,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     })
     const shouldUseLiveValues = (roundIndex: number, liveRound: FormLiveState['rounds'][string] | undefined) => (
       Boolean(liveRound)
+      && isFreshLiveRound(liveRound)
       && (
         liveRound?.confirmed === true
         || (
@@ -466,6 +477,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
         rounds: prev.rounds.map(round => {
           const liveRound = live.rounds[String(round.index)]
           if (!liveRound) return round
+          if (!isFreshLiveRound(liveRound)) return round
           return {
             ...round,
             value: shouldUseLiveValues(round.index, liveRound) ? liveRound.values?.[0] ?? round.value : round.value,
@@ -769,8 +781,13 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
       }
       try {
         const res = await fetch(`/api/forms/live?formKey=${encodeURIComponent(liveFormKey)}&t=${Date.now()}`, { cache: 'no-store' })
-        const data = await res.json().catch(() => null) as { ok?: boolean; live?: FormLiveState } | null
+        const data = await res.json().catch(() => null) as { ok?: boolean; live?: FormLiveState; staleSaving?: boolean } | null
         const live = data?.live
+        if (data?.ok && live && data.staleSaving) {
+          liveVersionByForm.current[liveFormKey] = Math.max(liveVersionByForm.current[liveFormKey] ?? 0, live.version ?? 0)
+          await refreshState(liveFormKey, { force: true })
+          return
+        }
         if (data?.ok && live && live.version > (liveVersionByForm.current[liveFormKey] ?? 0)) {
           applyLiveState(live)
         }
@@ -786,7 +803,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
       stopped = true
       if (timer) window.clearTimeout(timer)
     }
-  }, [applyLiveState, canSeeContent, currentForm])
+  }, [applyLiveState, canSeeContent, currentForm, refreshState])
 
   const loginStaff = async () => {
     if (!currentForm || !passwordInput.trim()) return
@@ -1277,7 +1294,11 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
       }
       try {
         const res = await fetch(`/api/forms/live?formKey=${encodeURIComponent(liveKey)}&t=${Date.now()}`, { cache: 'no-store' })
-        const data = await res.json().catch(() => null) as { ok?: boolean; live?: FormLiveState } | null
+        const data = await res.json().catch(() => null) as { ok?: boolean; live?: FormLiveState; staleSaving?: boolean } | null
+        if (data?.ok && data.live && data.staleSaving) {
+          refreshMoneyDropSpecial(currentState?.form.formKey)
+          return
+        }
         if (data?.ok && data.live) applyMoneyDropSpecialLive(data.live)
       } catch {
         // This is only the fast UI signal. The sheet write remains authoritative.
@@ -1291,7 +1312,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
       stopped = true
       if (timer) window.clearTimeout(timer)
     }
-  }, [applyMoneyDropSpecialLive, moneyDropSpecial?.liveKey])
+  }, [applyMoneyDropSpecialLive, currentState?.form.formKey, moneyDropSpecial?.liveKey, refreshMoneyDropSpecial])
 
   const selectedAutoRow = currentState && currentState.form.kind !== 'match-single' ? fillToRank : -1
   const visibleRankLabels = currentState

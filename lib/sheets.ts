@@ -246,6 +246,7 @@ export async function fetchWaveInputs(wave: number): Promise<{ rows: WaveInputRo
 export interface GroupChatMessage {
   id: string
   chatId: string
+  clientId?: string
   row: number
   timestamp: string
   dateKey: string
@@ -257,6 +258,8 @@ export interface GroupChatMessage {
   sendTo: string
   replyToId: string
   topic: string
+  pending?: boolean
+  error?: string
 }
 
 export type GroupChatActor = number | 'admin' | string

@@ -5,9 +5,6 @@ import clsx from 'clsx'
 import { MessageCircle, RefreshCw, Send, X } from 'lucide-react'
 import { HOUSE_COLORS, HOUSE_NAMES, normalizeChatPermissions, type ChatPermissions } from '@/lib/constants'
 import {
-  fetchGroupChatLatestId,
-  fetchGroupChatMessages,
-  sendGroupChatMessage,
   type GroupChatActor,
   type GroupChatMessage,
 } from '@/lib/sheets'
@@ -162,6 +159,53 @@ function optimisticChatTime() {
     dateKey: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`,
     dateLabel: now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
     timeLabel: time,
+  }
+}
+
+async function fetchChatJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    cache: 'no-store',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(init?.headers ?? {}),
+    },
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok || data?.ok === false) throw new Error(data?.message || `Chat request failed: ${res.status}`)
+  return data as T
+}
+
+async function fetchGroupChatMessages(mode: 'bid' | 'report' = 'bid') {
+  const data = await fetchChatJson<{ messages: GroupChatMessage[]; latestId?: string }>(`/api/chat?mode=${encodeURIComponent(mode)}`)
+  return data.messages ?? []
+}
+
+async function fetchGroupChatLatestId(mode: 'bid' | 'report' = 'bid') {
+  const data = await fetchChatJson<{ latestId?: string }>(`/api/chat?mode=${encodeURIComponent(mode)}&latest=1`)
+  return data.latestId || ''
+}
+
+async function sendGroupChatMessage(
+  actor: GroupChatActor,
+  message: string,
+  options: { sendTo?: string; replyToId?: string; topic?: string; clientId?: string } = {}
+): Promise<{ ok: boolean; message?: string }> {
+  try {
+    const data = await fetchChatJson<{ queued?: boolean; message?: string }>('/api/chat', {
+      method: 'POST',
+      body: JSON.stringify({
+        actor,
+        message,
+        sendTo: options.sendTo ?? 'public',
+        replyToId: options.replyToId ?? '',
+        topic: options.topic ?? 'bid',
+        clientId: options.clientId ?? '',
+      }),
+    })
+    return { ok: true, message: data.message || 'Sending to sheet...' }
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : String(error) }
   }
 }
 
@@ -364,7 +408,7 @@ export default function GroupChat({
     const intervalId = window.setInterval(() => {
       if (open) void refresh()
       else void checkLatest()
-    }, open ? 10000 : 30000)
+    }, open ? 1800 : 6000)
     return () => window.clearInterval(intervalId)
   }, [checkLatest, open, refresh])
 
@@ -424,11 +468,12 @@ export default function GroupChat({
     setSending(true)
     setDraft('')
     const now = Date.now()
+    const clientId = `${effectiveTopic}-${now}-${Math.random().toString(36).slice(2)}`
     const time = optimisticChatTime()
     const effectiveSendTo = target
     setMessages(prev => [...prev, {
-      id: `local-${now}`,
-      row: -now,
+      id: `live-${clientId}`,
+      row: now,
       timestamp: time.timestamp,
       dateKey: time.dateKey,
       dateLabel: time.dateLabel,
@@ -436,15 +481,23 @@ export default function GroupChat({
       sender: isAdminActor(actor) ? 'Admin' : String(actor),
       baan: typeof actor === 'number' ? actor : null,
       message,
-      chatId: `local-${now}`,
+      chatId: `live-${clientId}`,
+      clientId,
       sendTo: effectiveSendTo,
       replyToId: replyTo?.chatId ?? '',
       topic: effectiveTopic,
+      pending: true,
     }])
-    const result = await sendGroupChatMessage(actor, message, { sendTo: effectiveSendTo, replyToId: replyTo?.chatId ?? '', topic: effectiveTopic })
-    if (!result.ok) setError(result.message ?? 'Cannot send message')
+    const result = await sendGroupChatMessage(actor, message, { sendTo: effectiveSendTo, replyToId: replyTo?.chatId ?? '', topic: effectiveTopic, clientId })
+    if (!result.ok) {
+      const errorText = result.message ?? 'Cannot send message'
+      setError(errorText)
+      setMessages(prev => prev.map(item => item.clientId === clientId ? { ...item, pending: false, error: errorText } : item))
+    } else {
+      setError('')
+    }
     setReplyTo(null)
-    window.setTimeout(refresh, 900)
+    window.setTimeout(refresh, 500)
     setSending(false)
   }
 
@@ -522,6 +575,11 @@ export default function GroupChat({
                         </div>
                         <span className="group-chat-message-actions">
                           <span className="group-chat-time">{message.timeLabel}</span>
+                          {message.error ? (
+                            <span className="group-chat-time">not sent</span>
+                          ) : message.pending ? (
+                            <span className="group-chat-time">sending</span>
+                          ) : null}
                           <button type="button" className="group-chat-reply-btn" onClick={() => beginReply(message)}>
                             reply
                           </button>

@@ -2,6 +2,7 @@ import { after, NextResponse } from 'next/server'
 import { auth, isAllowedDocChulaEmail } from '@/auth'
 import {
   claimAndPublishFormRoundSubmit,
+  isFormLiveRoundSavingStale,
   publishFormRoundPatch,
   readFormLiveState,
   releaseFormRoundSubmitClaim,
@@ -55,18 +56,45 @@ function normalizeValue(roundIndex: number, value: unknown) {
 }
 
 async function mergeLive(state: MoneyDropSpecialState) {
-  const live = await readFormLiveState(state.liveKey)
-  return {
+  const sheetState = {
     ...state,
-    rounds: state.rounds.map(round => {
+    rounds: state.rounds.map(round => ({
+      ...round,
+      confirmed: String(round.value || '').trim() ? true : round.confirmed,
+      saving: false,
+      error: '',
+    })),
+  }
+  let live = await readFormLiveState(sheetState.liveKey)
+  const staleSavingPatches = sheetState.rounds.flatMap(round => {
+    const liveRound = live.rounds[String(round.index)]
+    if (!isFormLiveRoundSavingStale(liveRound)) return []
+    return [{
+      index: round.index,
+      confirmed: round.confirmed === true,
+      locked: round.locked === true,
+      saving: false,
+      error: '',
+      values: [round.value],
+    }]
+  })
+  if (staleSavingPatches.length) {
+    await Promise.all(staleSavingPatches.map(patch => releaseFormRoundSubmitClaim(sheetState.liveKey, patch.index)))
+    await publishFormRoundPatch(sheetState.liveKey, staleSavingPatches)
+    live = await readFormLiveState(sheetState.liveKey)
+  }
+  return {
+    ...sheetState,
+    rounds: sheetState.rounds.map(round => {
       const liveRound = live.rounds[String(round.index)]
       if (!liveRound) return round
+      const saving = liveRound.saving === true && !isFormLiveRoundSavingStale(liveRound)
+      if (!saving) return round
       return {
         ...round,
-        value: liveRound.saving === true ? liveRound.values?.[0] ?? round.value : round.value,
-        confirmed: liveRound.confirmed === true,
-        locked: liveRound.locked === true,
-        saving: liveRound.saving === true,
+        value: liveRound.values?.[0] ?? round.value,
+        locked: true,
+        saving,
         error: liveRound.error || '',
       }
     }),
@@ -183,5 +211,7 @@ async function persistMoneyDropSpecial({
       saving: false,
       error: message,
     }]).catch(() => undefined)
+  } finally {
+    await releaseFormRoundSubmitClaim(liveKey, roundIndex).catch(() => undefined)
   }
 }

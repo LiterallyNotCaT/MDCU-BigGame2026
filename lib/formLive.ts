@@ -1,5 +1,5 @@
 import type { ScoringFormState } from '@/lib/forms'
-import { redisDeleteKey, redisGetJson, redisSetJson, redisSetJsonIfNotExists } from '@/lib/redisStore'
+import { redisDeleteKey, redisGetJson, redisSetJsonWithTtl, redisSetJsonIfNotExists } from '@/lib/redisStore'
 
 export type FormLiveRound = {
   confirmed: boolean
@@ -30,8 +30,9 @@ type RoundPatch = {
   values?: string[]
 }
 
-const FORM_SUBMIT_CLAIM_TTL_SECONDS = 10 * 60
+const FORM_SUBMIT_CLAIM_TTL_SECONDS = 2 * 60
 const FORM_SUBMIT_STALE_MS = 2 * 60 * 1000
+const FORM_LIVE_TTL_SECONDS = 3 * 60
 
 function formLiveKey(formKey: string) {
   return `biggame_form_live:${Buffer.from(String(formKey)).toString('base64url')}`
@@ -39,6 +40,22 @@ function formLiveKey(formKey: string) {
 
 function formSubmitClaimKey(formKey: string, roundIndex: number) {
   return `biggame_form_submit_claim:${Buffer.from(`${formKey}:${roundIndex}`).toString('base64url')}`
+}
+
+export function isFormLiveRoundSavingStale(round: FormLiveRound | undefined) {
+  if (!round?.saving) return false
+  const updatedMs = new Date(round.updatedAt || '').getTime()
+  return !Number.isFinite(updatedMs) || Date.now() - updatedMs > FORM_SUBMIT_STALE_MS
+}
+
+export function hasStaleSavingFormLiveRound(live: FormLiveState | null | undefined) {
+  return Object.values(live?.rounds ?? {}).some(round => isFormLiveRoundSavingStale(round))
+}
+
+export function isFormLiveStateExpired(live: FormLiveState | null | undefined) {
+  if (!live?.version || hasStaleSavingFormLiveRound(live)) return false
+  const updatedMs = new Date(live.updatedAt || '').getTime()
+  return !Number.isFinite(updatedMs) || Date.now() - updatedMs > FORM_LIVE_TTL_SECONDS * 1000
 }
 
 function normalizeLiveState(formKey: string, value: unknown): FormLiveState {
@@ -70,6 +87,16 @@ export async function readFormLiveState(formKey: string) {
   const key = String(formKey || '').trim()
   if (!key) return normalizeLiveState('', null)
   return normalizeLiveState(key, await redisGetJson<FormLiveState>(formLiveKey(key)))
+}
+
+export async function deleteFormLiveState(formKey: string) {
+  const key = String(formKey || '').trim()
+  if (!key) return
+  await redisDeleteKey(formLiveKey(key))
+}
+
+async function writeFormLiveState(key: string, state: FormLiveState) {
+  await redisSetJsonWithTtl(formLiveKey(key), state, FORM_LIVE_TTL_SECONDS)
 }
 
 function nextLiveStateFromPatches(key: string, existing: FormLiveState, patches: RoundPatch[]) {
@@ -120,7 +147,7 @@ export async function publishFormRoundPatch(formKey: string, patches: RoundPatch
     await releaseFormRoundSubmitClaim(key, patch.index)
   }))
 
-  await redisSetJson(formLiveKey(key), nextLiveStateFromPatches(key, existing, patches))
+  await writeFormLiveState(key, nextLiveStateFromPatches(key, existing, patches))
 }
 
 export async function claimAndPublishFormRoundSubmit(formKey: string, roundIndex: number, isAdmin: boolean, patch: Omit<RoundPatch, 'index'>) {
@@ -139,7 +166,7 @@ export async function claimAndPublishFormRoundSubmit(formKey: string, roundIndex
         saving: false,
         error: 'Previous send timed out. Please retry.',
       }])
-      await redisSetJson(formLiveKey(key), existing)
+      await writeFormLiveState(key, existing)
       round = existing.rounds[String(roundIndex)]
     }
   }
@@ -155,7 +182,7 @@ export async function claimAndPublishFormRoundSubmit(formKey: string, roundIndex
   const claimed = await claimFormRoundSubmit(key, roundIndex)
   if (!claimed) throw new Error("Can't send the data as there is already confirmation from another person.")
 
-  await redisSetJson(formLiveKey(key), nextLiveStateFromPatches(key, existing, [{ index: roundIndex, ...patch }]))
+  await writeFormLiveState(key, nextLiveStateFromPatches(key, existing, [{ index: roundIndex, ...patch }]))
 }
 
 export async function claimFormRoundSubmit(formKey: string, roundIndex: number) {
@@ -176,16 +203,36 @@ export async function releaseFormRoundSubmitClaim(formKey: string, roundIndex: n
 
 export async function mergeFormLiveIntoState(state: ScoringFormState | null | undefined) {
   if (!state?.form?.formKey) return state
-  const live = await readFormLiveState(state.form.formKey)
+  let live = await readFormLiveState(state.form.formKey)
   if (!live.version) {
     await seedFormLiveState(state)
     return state
   }
 
+  const staleSavingPatches = state.rounds.flatMap((round, index) => {
+    const liveRound = live.rounds[String(index)]
+    if (!isFormLiveRoundSavingStale(liveRound)) return []
+    return [{
+      index,
+      confirmed: round.confirmed === true,
+      locked: round.locked === true,
+      saving: false,
+      error: '',
+      deadlineAt: round.deadlineAt || '',
+      participants: round.participants || '',
+      values: state.values.map(row => row[index] ?? ''),
+    }]
+  })
+  if (staleSavingPatches.length) {
+    await Promise.all(staleSavingPatches.map(patch => releaseFormRoundSubmitClaim(state.form.formKey, patch.index)))
+    await publishFormRoundPatch(state.form.formKey, staleSavingPatches)
+    live = await readFormLiveState(state.form.formKey)
+  }
+
   const liveValues = state.values.map((row, rowIndex) => row.map((cell, columnIndex) => {
     const liveRound = live.rounds[String(columnIndex)]
     const values = liveRound?.values
-    return liveRound?.saving && values && rowIndex < values.length ? values[rowIndex] : cell
+    return liveRound?.saving && !isFormLiveRoundSavingStale(liveRound) && values && rowIndex < values.length ? values[rowIndex] : cell
   }))
 
   return {
@@ -194,14 +241,14 @@ export async function mergeFormLiveIntoState(state: ScoringFormState | null | un
     rounds: state.rounds.map((round, index) => {
       const liveRound = live.rounds[String(index)]
       if (!liveRound) return round
+      const saving = liveRound.saving === true && !isFormLiveRoundSavingStale(liveRound)
+      if (!saving) return round
       return {
         ...round,
         participants: liveRound.participants || round.participants,
-        confirmed: liveRound.confirmed === true,
-        locked: liveRound.locked === true,
-        saving: liveRound.saving === true,
+        saving,
+        locked: true,
         error: liveRound.error || '',
-        deadlineAt: liveRound.deadlineAt || '',
       }
     }),
   } satisfies ScoringFormState

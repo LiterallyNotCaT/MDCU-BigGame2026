@@ -111,9 +111,9 @@ async function persistFormWrite({ payload, values, email }: { payload: Record<st
 }
 
 async function publishConfirmedRound(payload: Record<string, unknown>, values: string[]) {
+  const formKey = String(payload.formKey || '')
+  const roundIndex = Number(payload.roundIndex)
   try {
-    const formKey = String(payload.formKey || '')
-    const roundIndex = Number(payload.roundIndex)
     if (!formKey || !Number.isInteger(roundIndex) || roundIndex < 0) return
     await publishFormRoundPatch(formKey, [{
       index: roundIndex,
@@ -127,5 +127,9 @@ async function publishConfirmedRound(payload: Record<string, unknown>, values: s
     }])
   } catch (error) {
     console.error('Form live publish after write failed:', error)
+  } finally {
+    await releaseFormRoundSubmitClaim(formKey, roundIndex).catch(error => {
+      console.error('Form submit claim release after successful write failed:', error)
+    })
   }
 }

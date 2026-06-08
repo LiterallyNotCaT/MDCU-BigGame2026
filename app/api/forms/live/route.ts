@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { readFormLiveState } from '@/lib/formLive'
+import { deleteFormLiveState, hasStaleSavingFormLiveRound, isFormLiveStateExpired, readFormLiveState } from '@/lib/formLive'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -12,8 +12,12 @@ export async function GET(req: Request) {
   }
 
   try {
-    const live = await readFormLiveState(formKey)
-    return NextResponse.json({ ok: true, live }, {
+    let live = await readFormLiveState(formKey)
+    if (isFormLiveStateExpired(live)) {
+      await deleteFormLiveState(formKey)
+      live = await readFormLiveState(formKey)
+    }
+    return NextResponse.json({ ok: true, live, staleSaving: hasStaleSavingFormLiveRound(live) }, {
       headers: { 'Cache-Control': 'no-store' },
     })
   } catch (error) {
