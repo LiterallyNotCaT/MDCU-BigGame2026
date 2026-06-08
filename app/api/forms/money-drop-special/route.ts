@@ -4,6 +4,7 @@ import {
   claimAndPublishFormRoundSubmit,
   isFormLiveRoundSavingStale,
   publishFormRoundPatch,
+  publishFormRoundSavedSignal,
   readFormLiveState,
   releaseFormRoundSubmitClaim,
 } from '@/lib/formLive'
@@ -11,7 +12,7 @@ import { callGas } from '@/lib/gas'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-export const maxDuration = 30
+export const maxDuration = 60
 
 type MoneyDropSpecialRound = {
   index: number
@@ -183,6 +184,7 @@ async function persistMoneyDropSpecial({
   value: string
   email: string
 }) {
+  let keepClaimForSheetVerification = false
   try {
     await callGas({
       action: payload.oauth === true ? 'writeMoneyDropSpecialOAuth' : 'writeMoneyDropSpecial',
@@ -194,16 +196,17 @@ async function persistMoneyDropSpecial({
       roundIndex,
       value,
     })
-    await publishFormRoundPatch(liveKey, [{
-      index: roundIndex,
+    await publishFormRoundSavedSignal(liveKey, roundIndex, {
       confirmed: true,
       locked: false,
-      saving: false,
-      error: '',
-      values: [value],
-    }])
+    })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
+    if (/timed out/i.test(message)) {
+      keepClaimForSheetVerification = true
+      console.error('Money Drop special write timed out; leaving live state for sheet verification:', message)
+      return
+    }
     await releaseFormRoundSubmitClaim(liveKey, roundIndex).catch(() => undefined)
     await publishFormRoundPatch(liveKey, [{
       index: roundIndex,
@@ -212,6 +215,8 @@ async function persistMoneyDropSpecial({
       error: message,
     }]).catch(() => undefined)
   } finally {
-    await releaseFormRoundSubmitClaim(liveKey, roundIndex).catch(() => undefined)
+    if (!keepClaimForSheetVerification) {
+      await releaseFormRoundSubmitClaim(liveKey, roundIndex).catch(() => undefined)
+    }
   }
 }

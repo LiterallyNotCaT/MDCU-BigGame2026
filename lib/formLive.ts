@@ -30,8 +30,8 @@ type RoundPatch = {
   values?: string[]
 }
 
-const FORM_SUBMIT_CLAIM_TTL_SECONDS = 2 * 60
-const FORM_SUBMIT_STALE_MS = 2 * 60 * 1000
+const FORM_SUBMIT_CLAIM_TTL_SECONDS = 75
+const FORM_SUBMIT_STALE_MS = 75 * 1000
 const FORM_LIVE_TTL_SECONDS = 3 * 60
 
 function formLiveKey(formKey: string) {
@@ -148,6 +148,20 @@ export async function publishFormRoundPatch(formKey: string, patches: RoundPatch
   }))
 
   await writeFormLiveState(key, nextLiveStateFromPatches(key, existing, patches))
+}
+
+export async function publishFormRoundSavedSignal(formKey: string, roundIndex: number, patch: Omit<RoundPatch, 'index' | 'saving' | 'error' | 'values' | 'participants'> = {}) {
+  const key = String(formKey || '').trim()
+  if (!key || !Number.isInteger(roundIndex) || roundIndex < 0) return
+  await releaseFormRoundSubmitClaim(key, roundIndex)
+  await publishFormRoundPatch(key, [{
+    index: roundIndex,
+    ...patch,
+    saving: false,
+    error: '',
+    participants: '',
+    values: [],
+  }])
 }
 
 export async function claimAndPublishFormRoundSubmit(formKey: string, roundIndex: number, isAdmin: boolean, patch: Omit<RoundPatch, 'index'>) {
@@ -305,17 +319,37 @@ export async function mergeFormLiveIntoStates(states: Record<string, ScoringForm
 
 export async function publishFullFormState(state: ScoringFormState | null | undefined) {
   if (!state?.form?.formKey) return
-  await publishFormRoundPatch(
-    state.form.formKey,
-    state.rounds.map((round, index) => ({
+  const existing = await readFormLiveState(state.form.formKey)
+  const releaseClaims: number[] = []
+  const patches = state.rounds.flatMap((round, index) => {
+    const liveRound = existing.rounds[String(index)]
+    const liveSaving = liveRound?.saving === true
+    const staleSaving = isFormLiveRoundSavingStale(liveRound)
+
+    if (liveSaving && !staleSaving && round.confirmed !== true) {
+      return []
+    }
+    if (liveSaving) releaseClaims.push(index)
+
+    return [{
       index,
       confirmed: round.confirmed === true,
       locked: round.locked === true,
-      saving: round.saving === true,
-      error: round.error || '',
+      saving: false,
+      error: '',
       deadlineAt: round.deadlineAt || '',
-      participants: round.participants || '',
-      values: state.values.map(row => row[index] ?? ''),
-    })),
+      participants: '',
+      values: [],
+    }]
+  })
+
+  if (releaseClaims.length) {
+    await Promise.all(releaseClaims.map(index => releaseFormRoundSubmitClaim(state.form.formKey, index)))
+  }
+  if (!patches.length) return
+
+  await publishFormRoundPatch(
+    state.form.formKey,
+    patches,
   )
 }

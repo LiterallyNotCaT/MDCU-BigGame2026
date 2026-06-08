@@ -3,13 +3,14 @@ import { auth, isAllowedDocChulaEmail } from '@/auth'
 import {
   claimAndPublishFormRoundSubmit,
   publishFormRoundPatch,
+  publishFormRoundSavedSignal,
   releaseFormRoundSubmitClaim,
 } from '@/lib/formLive'
 import { callGas } from '@/lib/gas'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-export const maxDuration = 30
+export const maxDuration = 60
 
 function jsonError(message: string, status = 500) {
   return NextResponse.json({ ok: false, message }, { status })
@@ -96,6 +97,10 @@ async function persistFormWrite({ payload, values, email }: { payload: Record<st
     const message = error instanceof Error ? error.message : String(error)
     const formKey = String(payload.formKey || '')
     const roundIndex = Number(payload.roundIndex)
+    if (/timed out/i.test(message)) {
+      console.error('Form background write timed out; leaving live state for sheet verification:', message)
+      return
+    }
     await releaseFormRoundSubmitClaim(formKey, roundIndex).catch(err => {
       console.error('Form submit claim release after background write failed:', err)
     })
@@ -115,16 +120,11 @@ async function publishConfirmedRound(payload: Record<string, unknown>, values: s
   const roundIndex = Number(payload.roundIndex)
   try {
     if (!formKey || !Number.isInteger(roundIndex) || roundIndex < 0) return
-    await publishFormRoundPatch(formKey, [{
-      index: roundIndex,
+    await publishFormRoundSavedSignal(formKey, roundIndex, {
       confirmed: true,
       locked: false,
-      saving: false,
-      error: '',
       deadlineAt: '',
-      participants: String(payload.participants ?? ''),
-      values,
-    }])
+    })
   } catch (error) {
     console.error('Form live publish after write failed:', error)
   } finally {

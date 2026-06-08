@@ -5,7 +5,7 @@ type GasResponse = {
 }
 
 const GAS_URL = process.env.GAS_URL || process.env.NEXT_PUBLIC_GAS_URL || ''
-const DEFAULT_GAS_TIMEOUT_MS = 25_000
+const DEFAULT_GAS_TIMEOUT_MS = 55_000
 
 export async function callGas<T = GasResponse>(payload: Record<string, unknown>): Promise<T> {
   if (!GAS_URL) throw new Error('GAS URL not configured')

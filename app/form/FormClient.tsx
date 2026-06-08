@@ -74,11 +74,21 @@ type MoneyDropSpecialState = {
 const FORM_TABS = ['เช้าล่าง', 'เช้าบน', 'Games บ่าย']
 const FORM_SESSION_STORAGE_KEY = 'biggame_form_sessions_v1'
 const FORM_LIVE_CLIENT_MAX_AGE_MS = 2 * 60 * 1000
+const FORM_FETCH_TIMEOUT_MS = 75_000
 
 function isFreshLiveRound(round: FormLiveState['rounds'][string] | undefined) {
   if (!round?.updatedAt) return false
   const updatedMs = new Date(round.updatedAt).getTime()
   return Number.isFinite(updatedMs) && Date.now() - updatedMs <= FORM_LIVE_CLIENT_MAX_AGE_MS
+}
+
+function hasFreshSavedSignal(live: FormLiveState | undefined) {
+  return Object.values(live?.rounds ?? {}).some(round => (
+    isFreshLiveRound(round)
+    && round.confirmed === true
+    && round.saving !== true
+    && !round.error
+  ))
 }
 
 type StoredFormSession = {
@@ -252,16 +262,26 @@ function validatedColumn(
 
 async function fetchJson<T>(url: string, init?: RequestInit & { timeoutMs?: number }): Promise<T> {
   const controller = new AbortController()
-  const timeout = window.setTimeout(() => controller.abort(), init?.timeoutMs ?? 45000)
-  const res = await fetch(url, {
-    ...init,
-    signal: init?.signal ?? controller.signal,
-    cache: 'no-store',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
-  }).finally(() => window.clearTimeout(timeout))
+  const timeout = window.setTimeout(() => controller.abort(), init?.timeoutMs ?? FORM_FETCH_TIMEOUT_MS)
+  let res: Response
+  try {
+    res = await fetch(url, {
+      ...init,
+      signal: init?.signal ?? controller.signal,
+      cache: 'no-store',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(init?.headers ?? {}),
+      },
+    })
+  } catch (error) {
+    if ((error as { name?: string })?.name === 'AbortError') {
+      throw new Error('Loading timed out. The sheet is taking too long, please refresh once.')
+    }
+    throw error
+  } finally {
+    window.clearTimeout(timeout)
+  }
   const data = await res.json().catch(() => ({}))
   if (!res.ok || data?.ok === false) throw new Error(data?.message || `Request failed: ${res.status}`)
   return data
@@ -302,12 +322,19 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
   const liveVersionByForm = useRef<Record<string, number>>({})
   const statesByFormKeyRef = useRef<Record<string, ScoringFormState>>({})
   const formStateRequestSeq = useRef(0)
+  const stateUiLoadSeq = useRef(0)
   const latestFormStateRequestSeq = useRef<Record<string, number>>({})
   const sheetFreshLoadedForms = useRef<Set<string>>(new Set())
   const dirtyRoundsByForm = useRef<Record<string, Set<number>>>({})
   const submittingRoundsByForm = useRef<Record<string, Set<number>>>({})
   const dirtyMoneyDropRoundsByLiveKey = useRef<Record<string, Set<number>>>({})
   const submittingMoneyDropRoundsByLiveKey = useRef<Record<string, Set<number>>>({})
+  const stateRef = useRef<ScoringFormState | null>(null)
+  const draftRef = useRef<string[][]>([])
+  const fillToRankRef = useRef(3)
+  const participantsByRoundRef = useRef<string[]>([])
+  const moneyDropSpecialRef = useRef<MoneyDropSpecialState | null>(null)
+  const moneyDropSpecialDraftRef = useRef<string[]>(['', ''])
   const grouped = useMemo(() => groupByTab(forms), [forms])
   const currentForms = grouped[tab] ?? []
   const currentForm = forms.find(form => form.formKey === formKey) ?? currentForms[0] ?? null
@@ -353,6 +380,30 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     statesByFormKeyRef.current = statesByFormKey
   }, [statesByFormKey])
 
+  useEffect(() => {
+    stateRef.current = state
+  }, [state])
+
+  useEffect(() => {
+    draftRef.current = draft
+  }, [draft])
+
+  useEffect(() => {
+    fillToRankRef.current = fillToRank
+  }, [fillToRank])
+
+  useEffect(() => {
+    participantsByRoundRef.current = participantsByRound
+  }, [participantsByRound])
+
+  useEffect(() => {
+    moneyDropSpecialRef.current = moneyDropSpecial
+  }, [moneyDropSpecial])
+
+  useEffect(() => {
+    moneyDropSpecialDraftRef.current = moneyDropSpecialDraft
+  }, [moneyDropSpecialDraft])
+
   const markRoundInRef = (ref: MutableRefObject<Record<string, Set<number>>>, key: string, roundIndex: number) => {
     if (!key || !Number.isInteger(roundIndex)) return
     const existing = ref.current[key] ?? new Set<number>()
@@ -371,6 +422,101 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     ref.current[key]?.has(roundIndex) === true
   )
 
+  const protectedRoundsForForm = (formKey: string) => {
+    const rounds = new Set<number>()
+    dirtyRoundsByForm.current[formKey]?.forEach(index => rounds.add(index))
+    submittingRoundsByForm.current[formKey]?.forEach(index => rounds.add(index))
+    return rounds
+  }
+
+  const mergeFormStateWithLocalDraft = useCallback((incoming: ScoringFormState) => {
+    const formKey = incoming.form.formKey
+    const protectedRounds = protectedRoundsForForm(formKey)
+    if (!protectedRounds.size) return incoming
+
+    protectedRounds.forEach(roundIndex => {
+      const incomingRound = incoming.rounds[roundIndex]
+      if (incomingRound?.confirmed === true && incomingRound.saving !== true) {
+        clearRoundInRef(dirtyRoundsByForm, formKey, roundIndex)
+        clearRoundInRef(submittingRoundsByForm, formKey, roundIndex)
+        protectedRounds.delete(roundIndex)
+      } else if (incomingRound && incomingRound.saving !== true && isRoundInRef(submittingRoundsByForm, formKey, roundIndex)) {
+        clearRoundInRef(submittingRoundsByForm, formKey, roundIndex)
+        if (!isRoundInRef(dirtyRoundsByForm, formKey, roundIndex)) protectedRounds.delete(roundIndex)
+      }
+    })
+    if (!protectedRounds.size) return incoming
+
+    const localIsVisible = stateRef.current?.form.formKey === formKey
+    const localState = localIsVisible ? stateRef.current : statesByFormKeyRef.current[formKey]
+    const localDraft = localIsVisible ? draftRef.current : (localState ? blankDraft(localState) : [])
+    const localParticipants = localIsVisible
+      ? participantsByRoundRef.current
+      : (localState ? localState.rounds.map(round => defaultParticipants(round.participants)) : [])
+    const localFillToRank = localIsVisible ? fillToRankRef.current : localState?.fillToRank
+
+    return {
+      ...incoming,
+      fillToRank: localFillToRank ?? incoming.fillToRank,
+      values: incoming.values.map((row, rowIndex) => row.map((cell, columnIndex) => (
+        protectedRounds.has(columnIndex)
+          ? localDraft[rowIndex]?.[columnIndex] ?? localState?.values[rowIndex]?.[columnIndex] ?? cell
+          : cell
+      ))),
+      rounds: incoming.rounds.map((round, index) => {
+        if (!protectedRounds.has(index)) return round
+        const submitting = isRoundInRef(submittingRoundsByForm, formKey, index)
+        return {
+          ...round,
+          participants: localParticipants[index] ?? localState?.rounds[index]?.participants ?? round.participants,
+          locked: submitting ? true : round.locked,
+          saving: submitting ? true : round.saving,
+          error: submitting ? '' : round.error,
+        }
+      }),
+    } satisfies ScoringFormState
+  }, [])
+
+  const mergeMoneyDropSpecialWithLocalDraft = useCallback((incoming: MoneyDropSpecialState) => {
+    const liveKey = incoming.liveKey
+    const protectedRounds = new Set<number>()
+    dirtyMoneyDropRoundsByLiveKey.current[liveKey]?.forEach(index => protectedRounds.add(index))
+    submittingMoneyDropRoundsByLiveKey.current[liveKey]?.forEach(index => protectedRounds.add(index))
+    if (!protectedRounds.size) return incoming
+
+    protectedRounds.forEach(roundIndex => {
+      const incomingRound = incoming.rounds.find(round => round.index === roundIndex)
+      if (incomingRound?.confirmed === true && incomingRound.saving !== true) {
+        clearRoundInRef(dirtyMoneyDropRoundsByLiveKey, liveKey, roundIndex)
+        clearRoundInRef(submittingMoneyDropRoundsByLiveKey, liveKey, roundIndex)
+        protectedRounds.delete(roundIndex)
+      } else if (incomingRound && incomingRound.saving !== true && isRoundInRef(submittingMoneyDropRoundsByLiveKey, liveKey, roundIndex)) {
+        clearRoundInRef(submittingMoneyDropRoundsByLiveKey, liveKey, roundIndex)
+        if (!isRoundInRef(dirtyMoneyDropRoundsByLiveKey, liveKey, roundIndex)) protectedRounds.delete(roundIndex)
+      }
+    })
+    if (!protectedRounds.size) return incoming
+
+    const localState = moneyDropSpecialRef.current?.liveKey === liveKey ? moneyDropSpecialRef.current : null
+    const localDraft = moneyDropSpecialRef.current?.liveKey === liveKey ? moneyDropSpecialDraftRef.current : []
+
+    return {
+      ...incoming,
+      rounds: incoming.rounds.map(round => {
+        if (!protectedRounds.has(round.index)) return round
+        const localRound = localState?.rounds.find(item => item.index === round.index)
+        const submitting = isRoundInRef(submittingMoneyDropRoundsByLiveKey, liveKey, round.index)
+        return {
+          ...round,
+          value: localDraft[round.index] ?? localRound?.value ?? round.value,
+          locked: submitting ? true : round.locked,
+          saving: submitting ? true : round.saving,
+          error: submitting ? '' : round.error,
+        }
+      }),
+    } satisfies MoneyDropSpecialState
+  }, [])
+
   const applyLiveState = useCallback((live: FormLiveState) => {
     if (!live?.formKey || !live.version || !live.rounds) return
     liveVersionByForm.current[live.formKey] = Math.max(liveVersionByForm.current[live.formKey] ?? 0, live.version)
@@ -387,13 +533,9 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     const shouldUseLiveValues = (roundIndex: number, liveRound: FormLiveState['rounds'][string] | undefined) => (
       Boolean(liveRound)
       && isFreshLiveRound(liveRound)
-      && (
-        liveRound?.confirmed === true
-        || (
-          !isRoundInRef(dirtyRoundsByForm, live.formKey, roundIndex)
-          && !isRoundInRef(submittingRoundsByForm, live.formKey, roundIndex)
-        )
-      )
+      && liveRound?.saving === true
+      && !isRoundInRef(dirtyRoundsByForm, live.formKey, roundIndex)
+      && !isRoundInRef(submittingRoundsByForm, live.formKey, roundIndex)
     )
     const mergeValues = (values: ScoringFormState['values']) => values.map((row, rowIndex) => row.map((cell, columnIndex) => {
       const liveRound = live.rounds[String(columnIndex)]
@@ -404,17 +546,18 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
       const liveRound = live.rounds[String(index)]
       if (!liveRound) return round
       if (!isFreshLiveRound(liveRound)) return round
+      const useLiveValues = liveRound.saving === true
       if (
         round.confirmed === liveRound.confirmed
         && round.locked === liveRound.locked
         && (round.saving || false) === (liveRound.saving || false)
         && (round.error || '') === (liveRound.error || '')
         && (round.deadlineAt || '') === (liveRound.deadlineAt || '')
-        && (round.participants || '') === (liveRound.participants || round.participants || '')
+        && (!useLiveValues || (round.participants || '') === (liveRound.participants || round.participants || ''))
       ) return round
       return {
         ...round,
-        participants: liveRound.participants || round.participants,
+        participants: useLiveValues ? liveRound.participants || round.participants : round.participants,
         confirmed: liveRound.confirmed === true,
         locked: liveRound.locked === true,
         saving: liveRound.saving === true,
@@ -425,26 +568,40 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
 
     setState(prev => {
       if (!prev || prev.form.formKey !== live.formKey) return prev
-      return { ...prev, values: mergeValues(prev.values), rounds: mergeRounds(prev.rounds) }
+      const next = { ...prev, values: mergeValues(prev.values), rounds: mergeRounds(prev.rounds) }
+      stateRef.current = next
+      return next
     })
     setStatesByFormKey(prev => {
       const cached = prev[live.formKey]
       if (!cached) return prev
       const nextState = { ...cached, values: mergeValues(cached.values), rounds: mergeRounds(cached.rounds) }
+      statesByFormKeyRef.current = {
+        ...statesByFormKeyRef.current,
+        [live.formKey]: nextState,
+      }
       return {
         ...prev,
         [live.formKey]: nextState,
       }
     })
-    setDraft(prev => prev.map((row, rowIndex) => row.map((cell, columnIndex) => {
-      const liveRound = live.rounds[String(columnIndex)]
-      const liveValues = liveRound?.values
-      return Array.isArray(liveValues) && rowIndex < liveValues.length && shouldUseLiveValues(columnIndex, liveRound) ? liveValues[rowIndex] : cell
-    })))
-    setParticipantsByRound(prev => prev.map((value, index) => {
-      const liveRound = live.rounds[String(index)]
-      return liveRound?.participants && shouldUseLiveValues(index, liveRound) ? liveRound.participants : value
-    }))
+    setDraft(prev => {
+      const next = prev.map((row, rowIndex) => row.map((cell, columnIndex) => {
+        const liveRound = live.rounds[String(columnIndex)]
+        const liveValues = liveRound?.values
+        return Array.isArray(liveValues) && rowIndex < liveValues.length && shouldUseLiveValues(columnIndex, liveRound) ? liveValues[rowIndex] : cell
+      }))
+      draftRef.current = next
+      return next
+    })
+    setParticipantsByRound(prev => {
+      const next = prev.map((value, index) => {
+        const liveRound = live.rounds[String(index)]
+        return liveRound?.participants && shouldUseLiveValues(index, liveRound) ? liveRound.participants : value
+      })
+      participantsByRoundRef.current = next
+      return next
+    })
   }, [])
 
   const applyMoneyDropSpecialLive = useCallback((live: FormLiveState) => {
@@ -462,17 +619,13 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     const shouldUseLiveValues = (roundIndex: number, liveRound: FormLiveState['rounds'][string] | undefined) => (
       Boolean(liveRound)
       && isFreshLiveRound(liveRound)
-      && (
-        liveRound?.confirmed === true
-        || (
-          !isRoundInRef(dirtyMoneyDropRoundsByLiveKey, live.formKey, roundIndex)
-          && !isRoundInRef(submittingMoneyDropRoundsByLiveKey, live.formKey, roundIndex)
-        )
-      )
+      && liveRound?.saving === true
+      && !isRoundInRef(dirtyMoneyDropRoundsByLiveKey, live.formKey, roundIndex)
+      && !isRoundInRef(submittingMoneyDropRoundsByLiveKey, live.formKey, roundIndex)
     )
     setMoneyDropSpecial(prev => {
       if (!prev || prev.liveKey !== live.formKey) return prev
-      return {
+      const next = {
         ...prev,
         rounds: prev.rounds.map(round => {
           const liveRound = live.rounds[String(round.index)]
@@ -488,11 +641,17 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
           }
         }),
       }
+      moneyDropSpecialRef.current = next
+      return next
     })
-    setMoneyDropSpecialDraft(prev => prev.map((value, index) => {
-      const liveRound = live.rounds[String(index)]
-      return shouldUseLiveValues(index, liveRound) ? liveRound?.values?.[0] ?? value : value
-    }))
+    setMoneyDropSpecialDraft(prev => {
+      const next = prev.map((value, index) => {
+        const liveRound = live.rounds[String(index)]
+        return shouldUseLiveValues(index, liveRound) ? liveRound?.values?.[0] ?? value : value
+      })
+      moneyDropSpecialDraftRef.current = next
+      return next
+    })
   }, [])
 
   const refreshConfig = useCallback(async () => {
@@ -529,18 +688,25 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     }
   }, [])
 
-  const applyFormState = useCallback((nextState: ScoringFormState) => {
+  const applyFormState = useCallback((incomingState: ScoringFormState) => {
+    const nextState = mergeFormStateWithLocalDraft(incomingState)
+    const nextDraft = blankDraft(nextState)
+    const nextFillToRank = clampFillToRank(nextState.fillToRank || nextState.form.defaultFillToRank)
+    const nextParticipants = nextState.rounds.map(round => defaultParticipants(round.participants))
     setStateLoadError('')
     setLoadingState(false)
-    delete dirtyRoundsByForm.current[nextState.form.formKey]
-    delete submittingRoundsByForm.current[nextState.form.formKey]
+    stateRef.current = nextState
+    draftRef.current = nextDraft
+    fillToRankRef.current = nextFillToRank
+    participantsByRoundRef.current = nextParticipants
     setState(nextState)
-    setDraft(blankDraft(nextState))
-    setFillToRank(clampFillToRank(nextState.fillToRank || nextState.form.defaultFillToRank))
-    setParticipantsByRound(nextState.rounds.map(round => defaultParticipants(round.participants)))
+    setDraft(nextDraft)
+    setFillToRank(nextFillToRank)
+    setParticipantsByRound(nextParticipants)
     const maxVisibleRounds = nextState.form.maxRounds || nextState.rounds.length
     setSelectedRound(prev => Math.min(prev, Math.max(0, Math.min(nextState.rounds.length, maxVisibleRounds) - 1)))
-  }, [])
+    return nextState
+  }, [mergeFormStateWithLocalDraft])
 
   const formKeysForTab = useCallback((tabName: string) => (
     (grouped[tabName] ?? []).filter(form => !form.blank).map(form => form.formKey)
@@ -573,12 +739,15 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     if (forceLoaded) {
       Object.keys(acceptedStates).forEach(key => sheetFreshLoadedForms.current.add(key))
     }
-    if (Object.keys(acceptedStates).length) {
-      statesByFormKeyRef.current = { ...statesByFormKeyRef.current, ...acceptedStates }
-      setStatesByFormKey(prev => ({ ...prev, ...acceptedStates }))
+    const mergedAcceptedStates = Object.fromEntries(
+      Object.entries(acceptedStates).map(([key, item]) => [key, mergeFormStateWithLocalDraft(item)] as const),
+    ) as Record<string, ScoringFormState>
+    if (Object.keys(mergedAcceptedStates).length) {
+      statesByFormKeyRef.current = { ...statesByFormKeyRef.current, ...mergedAcceptedStates }
+      setStatesByFormKey(prev => ({ ...prev, ...mergedAcceptedStates }))
     }
-    return acceptedStates
-  }, [formKeysForTab])
+    return mergedAcceptedStates
+  }, [formKeysForTab, mergeFormStateWithLocalDraft])
 
   const roundCountForForm = useCallback((form: ScoringFormConfig) => {
     const cached = statesByFormKey[form.formKey]
@@ -620,7 +789,12 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
       }
     }
 
-    setState(prev => prev && targetMap.has(prev.form.formKey) ? patchState(prev) : prev)
+    setState(prev => {
+      if (!prev || !targetMap.has(prev.form.formKey)) return prev
+      const next = patchState(prev)
+      stateRef.current = next
+      return next
+    })
     setStatesByFormKey(prev => {
       let changed = false
       const next = { ...prev }
@@ -630,6 +804,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
         next[formKeyItem] = patchState(cached)
         changed = true
       }
+      if (changed) statesByFormKeyRef.current = { ...statesByFormKeyRef.current, ...next }
       return changed ? next : prev
     })
   }, [])
@@ -671,10 +846,26 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
       applyFormState(cachedState)
       return
     }
+    const uiLoadSeq = ++stateUiLoadSeq.current
     const selectedForm = forms.find(form => form.formKey === nextFormKey)
     setLoadingState(true)
     setStateLoadError('')
     try {
+      if (selectedForm && options?.force === true && (adminSession || oauthProfile)) {
+        const requestSeq = ++formStateRequestSeq.current
+        latestFormStateRequestSeq.current[nextFormKey] = requestSeq
+        const data = await fetchJson<{ state: ScoringFormState }>('/api/forms/state', {
+          method: 'POST',
+          timeoutMs: FORM_FETCH_TIMEOUT_MS,
+          body: JSON.stringify({ formKey: nextFormKey, force: true }),
+        })
+        if (latestFormStateRequestSeq.current[nextFormKey] !== requestSeq) return
+        const appliedState = applyFormState(data.state)
+        sheetFreshLoadedForms.current.add(nextFormKey)
+        statesByFormKeyRef.current = { ...statesByFormKeyRef.current, [nextFormKey]: appliedState }
+        setStatesByFormKey(prev => ({ ...prev, [nextFormKey]: appliedState }))
+        return
+      }
       if (adminSession && selectedForm) {
         const loadedStates = await loadStatesForTab(selectedForm.tab, {
           password: adminSession?.password ?? '',
@@ -706,18 +897,20 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
         body: JSON.stringify({ formKey: nextFormKey, force: options?.force === true }),
       })
       if (latestFormStateRequestSeq.current[nextFormKey] !== requestSeq) return
-      applyFormState(data.state)
+      const appliedState = applyFormState(data.state)
       if (options?.force === true) sheetFreshLoadedForms.current.add(nextFormKey)
-      statesByFormKeyRef.current = { ...statesByFormKeyRef.current, [nextFormKey]: data.state }
-      setStatesByFormKey(prev => ({ ...prev, [nextFormKey]: data.state }))
+      statesByFormKeyRef.current = { ...statesByFormKeyRef.current, [nextFormKey]: appliedState }
+      setStatesByFormKey(prev => ({ ...prev, [nextFormKey]: appliedState }))
     } catch (error) {
       const message = error instanceof Error
         ? (error.name === 'AbortError' ? 'Loading table timed out. Please refresh.' : error.message)
         : String(error)
-      setStateLoadError(message)
-      notify('err', message)
+      if (stateUiLoadSeq.current === uiLoadSeq) {
+        setStateLoadError(message)
+        notify('err', message)
+      }
     } finally {
-      setLoadingState(false)
+      if (stateUiLoadSeq.current === uiLoadSeq) setLoadingState(false)
     }
   }, [adminSession, applyFormState, formKey, forms, loadStatesForTab, oauthProfile])
 
@@ -759,6 +952,9 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     setState(null)
     setDraft([])
     setParticipantsByRound([])
+    stateRef.current = null
+    draftRef.current = []
+    participantsByRoundRef.current = []
     setStateLoadError('')
     setSelectedRound(0)
   }, [canLoadSelectedForm, currentState?.form.formKey, formKey, refreshState])
@@ -789,7 +985,9 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
           return
         }
         if (data?.ok && live && live.version > (liveVersionByForm.current[liveFormKey] ?? 0)) {
+          const shouldRefreshSheet = hasFreshSavedSignal(live)
           applyLiveState(live)
+          if (shouldRefreshSheet) await refreshState(liveFormKey, { force: true })
         }
       } catch {
         // Live sync is only a fast UI signal; the sheet write remains authoritative.
@@ -861,6 +1059,9 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     adminPreloadedTabs.current.clear()
     sheetFreshLoadedForms.current.clear()
     statesByFormKeyRef.current = {}
+    stateRef.current = null
+    draftRef.current = []
+    participantsByRoundRef.current = []
     setState(null)
     setStatesByFormKey({})
     setDraft([])
@@ -868,17 +1069,97 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
   }
 
   const updateCell = (rowIndex: number, roundIndex: number, value: string) => {
-    if (currentState?.form.formKey) markRoundInRef(dirtyRoundsByForm, currentState.form.formKey, roundIndex)
-    setDraft(prev => prev.map((row, r) => r === rowIndex
+    const currentFormKey = currentState?.form.formKey
+    if (currentFormKey) markRoundInRef(dirtyRoundsByForm, currentFormKey, roundIndex)
+    setDraft(prev => {
+      const next = prev.map((row, r) => r === rowIndex
+        ? row.map((cell, c) => c === roundIndex ? value : cell)
+        : row
+      )
+      draftRef.current = next
+      return next
+    })
+    if (!currentFormKey) return
+    const patchValues = (values: ScoringFormState['values']) => values.map((row, r) => r === rowIndex
       ? row.map((cell, c) => c === roundIndex ? value : cell)
       : row
-    ))
+    )
+    setState(prev => {
+      if (!prev || prev.form.formKey !== currentFormKey) return prev
+      const next = { ...prev, values: patchValues(prev.values) }
+      stateRef.current = next
+      return next
+    })
+    setStatesByFormKey(prev => {
+      const cached = prev[currentFormKey]
+      if (!cached) return prev
+      const nextCached = { ...cached, values: patchValues(cached.values) }
+      statesByFormKeyRef.current = { ...statesByFormKeyRef.current, [currentFormKey]: nextCached }
+      return { ...prev, [currentFormKey]: nextCached }
+    })
   }
 
   const updateParticipants = (roundIndex: number, value: string) => {
-    if (currentState?.form.formKey) markRoundInRef(dirtyRoundsByForm, currentState.form.formKey, roundIndex)
-    setParticipantsByRound(prev => prev.map((cell, index) => index === roundIndex ? value : cell))
+    const currentFormKey = currentState?.form.formKey
+    if (currentFormKey) markRoundInRef(dirtyRoundsByForm, currentFormKey, roundIndex)
+    setParticipantsByRound(prev => {
+      const next = prev.map((cell, index) => index === roundIndex ? value : cell)
+      participantsByRoundRef.current = next
+      return next
+    })
+    if (!currentFormKey) return
+    const patchRounds = (rounds: ScoringFormState['rounds']) => rounds.map((round, index) => (
+      index === roundIndex ? { ...round, participants: value } : round
+    ))
+    setState(prev => {
+      if (!prev || prev.form.formKey !== currentFormKey) return prev
+      const next = { ...prev, rounds: patchRounds(prev.rounds) }
+      stateRef.current = next
+      return next
+    })
+    setStatesByFormKey(prev => {
+      const cached = prev[currentFormKey]
+      if (!cached) return prev
+      const nextCached = { ...cached, rounds: patchRounds(cached.rounds) }
+      statesByFormKeyRef.current = { ...statesByFormKeyRef.current, [currentFormKey]: nextCached }
+      return { ...prev, [currentFormKey]: nextCached }
+    })
   }
+
+  const updateFillToRank = (value: number) => {
+    const nextFillToRank = clampFillToRank(value)
+    const currentFormKey = currentState?.form.formKey
+    if (currentFormKey) markRoundInRef(dirtyRoundsByForm, currentFormKey, selectedRound)
+    fillToRankRef.current = nextFillToRank
+    setFillToRank(nextFillToRank)
+    if (!currentFormKey) return
+    setState(prev => {
+      if (!prev || prev.form.formKey !== currentFormKey) return prev
+      const next = { ...prev, fillToRank: nextFillToRank }
+      stateRef.current = next
+      return next
+    })
+    setStatesByFormKey(prev => {
+      const cached = prev[currentFormKey]
+      if (!cached) return prev
+      const nextCached = { ...cached, fillToRank: nextFillToRank }
+      statesByFormKeyRef.current = { ...statesByFormKeyRef.current, [currentFormKey]: nextCached }
+      return { ...prev, [currentFormKey]: nextCached }
+    })
+  }
+
+  const applyMoneyDropSpecialState = useCallback((incomingState: MoneyDropSpecialState) => {
+    const nextState = mergeMoneyDropSpecialWithLocalDraft(incomingState)
+    const nextDraft = nextState.rounds.reduce<string[]>((draftValues, round) => {
+      draftValues[round.index] = round.value || ''
+      return draftValues
+    }, ['', ''])
+    moneyDropSpecialRef.current = nextState
+    moneyDropSpecialDraftRef.current = nextDraft
+    setMoneyDropSpecial(nextState)
+    setMoneyDropSpecialDraft(nextDraft)
+    return nextState
+  }, [mergeMoneyDropSpecialWithLocalDraft])
 
   const refreshMoneyDropSpecial = useCallback(async (nextFormKey = currentState?.form.formKey) => {
     if (!nextFormKey) return
@@ -888,20 +1169,30 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
         method: 'POST',
         body: JSON.stringify({ action: 'read', formKey: nextFormKey }),
       })
-      delete dirtyMoneyDropRoundsByLiveKey.current[data.state.liveKey]
-      delete submittingMoneyDropRoundsByLiveKey.current[data.state.liveKey]
-      setMoneyDropSpecial(data.state)
-      setMoneyDropSpecialDraft(data.state.rounds.map(round => round.value || ''))
+      applyMoneyDropSpecialState(data.state)
     } catch (error) {
       notify('err', error instanceof Error ? error.message : String(error))
     } finally {
       setMoneyDropSpecialLoading(false)
     }
-  }, [currentState?.form.formKey])
+  }, [applyMoneyDropSpecialState, currentState?.form.formKey])
 
   const updateMoneyDropSpecialDraft = (roundIndex: number, value: string) => {
     if (moneyDropSpecial?.liveKey) markRoundInRef(dirtyMoneyDropRoundsByLiveKey, moneyDropSpecial.liveKey, roundIndex)
-    setMoneyDropSpecialDraft(prev => prev.map((item, index) => index === roundIndex ? value : item))
+    setMoneyDropSpecialDraft(prev => {
+      const next = prev.map((item, index) => index === roundIndex ? value : item)
+      moneyDropSpecialDraftRef.current = next
+      return next
+    })
+    setMoneyDropSpecial(prev => {
+      if (!prev) return prev
+      const next = {
+        ...prev,
+        rounds: prev.rounds.map(round => round.index === roundIndex ? { ...round, value } : round),
+      }
+      moneyDropSpecialRef.current = next
+      return next
+    })
   }
 
   const confirmMoneyDropSpecial = async (roundIndex: number) => {
@@ -928,11 +1219,20 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
 
     markRoundInRef(submittingMoneyDropRoundsByLiveKey, moneyDropSpecial.liveKey, roundIndex)
     setMoneyDropSpecialSaving(prev => new Set(prev).add(roundIndex))
-    setMoneyDropSpecialDraft(prev => prev.map((item, index) => index === roundIndex ? value : item))
-    setMoneyDropSpecial(prev => prev ? {
-      ...prev,
-      rounds: prev.rounds.map(item => item.index === roundIndex ? { ...item, value, locked: true, saving: true, error: '' } : item),
-    } : prev)
+    setMoneyDropSpecialDraft(prev => {
+      const next = prev.map((item, index) => index === roundIndex ? value : item)
+      moneyDropSpecialDraftRef.current = next
+      return next
+    })
+    setMoneyDropSpecial(prev => {
+      if (!prev) return prev
+      const next = {
+        ...prev,
+        rounds: prev.rounds.map(item => item.index === roundIndex ? { ...item, value, locked: true, saving: true, error: '' } : item),
+      }
+      moneyDropSpecialRef.current = next
+      return next
+    })
     try {
       const response = await fetchJson<{ queued?: boolean; message?: string }>('/api/forms/money-drop-special', {
         method: 'POST',
@@ -950,14 +1250,23 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
         clearRoundInRef(dirtyMoneyDropRoundsByLiveKey, moneyDropSpecial.liveKey, roundIndex)
         clearRoundInRef(submittingMoneyDropRoundsByLiveKey, moneyDropSpecial.liveKey, roundIndex)
       }
+      if (response.queued) {
+        window.setTimeout(() => refreshMoneyDropSpecial(currentState.form.formKey), 8000)
+        window.setTimeout(() => refreshMoneyDropSpecial(currentState.form.formKey), 20000)
+      }
       notify('ok', response.message || 'Sending to sheet...')
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       clearRoundInRef(submittingMoneyDropRoundsByLiveKey, moneyDropSpecial.liveKey, roundIndex)
-      setMoneyDropSpecial(prev => prev ? {
-        ...prev,
-        rounds: prev.rounds.map(item => item.index === roundIndex ? { ...item, locked: false, saving: false, error: message } : item),
-      } : prev)
+      setMoneyDropSpecial(prev => {
+        if (!prev) return prev
+        const next = {
+          ...prev,
+          rounds: prev.rounds.map(item => item.index === roundIndex ? { ...item, locked: false, saving: false, error: message } : item),
+        }
+        moneyDropSpecialRef.current = next
+        return next
+      })
       notify('err', message)
     } finally {
       setMoneyDropSpecialSaving(prev => {
@@ -997,13 +1306,21 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
       next.add(roundIndex)
       return next
     })
-    setDraft(prev => prev.map((row, rowIndex) => row.map((cell, colIndex) => (
-      colIndex === roundIndex ? validated.values[rowIndex] ?? '' : cell
-    ))))
-    setParticipantsByRound(prev => prev.map((cell, index) => index === roundIndex ? participants : cell))
+    setDraft(prev => {
+      const next = prev.map((row, rowIndex) => row.map((cell, colIndex) => (
+        colIndex === roundIndex ? validated.values[rowIndex] ?? '' : cell
+      )))
+      draftRef.current = next
+      return next
+    })
+    setParticipantsByRound(prev => {
+      const next = prev.map((cell, index) => index === roundIndex ? participants : cell)
+      participantsByRoundRef.current = next
+      return next
+    })
     setState(prev => {
       if (!prev || prev.form.formKey !== currentState.form.formKey) return prev
-      return {
+      const next = {
         ...prev,
         fillToRank,
         values: prev.values.map((row, rowIndex) => row.map((cell, colIndex) => (
@@ -1014,23 +1331,30 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
           : item
         ),
       }
+      stateRef.current = next
+      return next
     })
     setStatesByFormKey(prev => {
       const cached = prev[currentState.form.formKey]
       if (!cached) return prev
+      const nextCached = {
+        ...cached,
+        fillToRank,
+        values: cached.values.map((row, rowIndex) => row.map((cell, colIndex) => (
+          colIndex === roundIndex ? validated.values[rowIndex] ?? '' : cell
+        ))),
+        rounds: cached.rounds.map((item, index) => index === roundIndex
+          ? { ...item, participants, confirmed: false, locked: true, saving: true, error: '' }
+          : item
+        ),
+      }
+      statesByFormKeyRef.current = {
+        ...statesByFormKeyRef.current,
+        [currentState.form.formKey]: nextCached,
+      }
       return {
         ...prev,
-        [currentState.form.formKey]: {
-          ...cached,
-          fillToRank,
-          values: cached.values.map((row, rowIndex) => row.map((cell, colIndex) => (
-            colIndex === roundIndex ? validated.values[rowIndex] ?? '' : cell
-          ))),
-          rounds: cached.rounds.map((item, index) => index === roundIndex
-            ? { ...item, participants, confirmed: false, locked: true, saving: true, error: '' }
-            : item
-          ),
-        },
+        [currentState.form.formKey]: nextCached,
       }
     })
     try {
@@ -1049,13 +1373,15 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
       })
       if (response.queued) {
         notify('ok', response.message || 'Sending to sheet...')
+        window.setTimeout(() => refreshState(currentState.form.formKey, { force: true }), 8000)
+        window.setTimeout(() => refreshState(currentState.form.formKey, { force: true }), 20000)
         return
       }
       clearRoundInRef(dirtyRoundsByForm, currentState.form.formKey, roundIndex)
       clearRoundInRef(submittingRoundsByForm, currentState.form.formKey, roundIndex)
       setState(prev => {
         if (!prev || prev.form.formKey !== currentState.form.formKey) return prev
-        return {
+        const next = {
           ...prev,
           fillToRank,
           values: prev.values.map((row, rowIndex) => row.map((cell, colIndex) => (
@@ -1066,23 +1392,30 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
             : item
           ),
         }
+        stateRef.current = next
+        return next
       })
       setStatesByFormKey(prev => {
         const cached = prev[currentState.form.formKey]
         if (!cached) return prev
+        const nextCached = {
+          ...cached,
+          fillToRank,
+          values: cached.values.map((row, rowIndex) => row.map((cell, colIndex) => (
+            colIndex === roundIndex ? validated.values[rowIndex] ?? '' : cell
+          ))),
+          rounds: cached.rounds.map((item, index) => index === roundIndex
+            ? { ...item, participants, confirmed: true, locked: false, saving: false, error: '' }
+            : item
+          ),
+        }
+        statesByFormKeyRef.current = {
+          ...statesByFormKeyRef.current,
+          [currentState.form.formKey]: nextCached,
+        }
         return {
           ...prev,
-          [currentState.form.formKey]: {
-            ...cached,
-            fillToRank,
-            values: cached.values.map((row, rowIndex) => row.map((cell, colIndex) => (
-              colIndex === roundIndex ? validated.values[rowIndex] ?? '' : cell
-            ))),
-            rounds: cached.rounds.map((item, index) => index === roundIndex
-              ? { ...item, participants, confirmed: true, locked: false, saving: false, error: '' }
-              : item
-            ),
-          },
+          [currentState.form.formKey]: nextCached,
         }
       })
       notify('ok', `Saved ${round.label}`)
@@ -1091,26 +1424,33 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
       clearRoundInRef(submittingRoundsByForm, currentState.form.formKey, roundIndex)
       setState(prev => {
         if (!prev || prev.form.formKey !== currentState.form.formKey) return prev
-        return {
+        const next = {
           ...prev,
           rounds: prev.rounds.map((item, index) => index === roundIndex
             ? { ...item, locked: false, saving: false, error: message }
             : item
           ),
         }
+        stateRef.current = next
+        return next
       })
       setStatesByFormKey(prev => {
         const cached = prev[currentState.form.formKey]
         if (!cached) return prev
+        const nextCached = {
+          ...cached,
+          rounds: cached.rounds.map((item, index) => index === roundIndex
+            ? { ...item, locked: false, saving: false, error: message }
+            : item
+          ),
+        }
+        statesByFormKeyRef.current = {
+          ...statesByFormKeyRef.current,
+          [currentState.form.formKey]: nextCached,
+        }
         return {
           ...prev,
-          [currentState.form.formKey]: {
-            ...cached,
-            rounds: cached.rounds.map((item, index) => index === roundIndex
-              ? { ...item, locked: false, saving: false, error: message }
-              : item
-            ),
-          },
+          [currentState.form.formKey]: nextCached,
         }
       })
       notify('err', message)
@@ -1143,27 +1483,38 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
       })
       const returnedState = response.data?.state ?? response.state
       if (returnedState) {
-        applyFormState(returnedState)
-        setStatesByFormKey(prev => ({ ...prev, [returnedState.form.formKey]: returnedState }))
+        const appliedState = applyFormState(returnedState)
+        statesByFormKeyRef.current = {
+          ...statesByFormKeyRef.current,
+          [appliedState.form.formKey]: appliedState,
+        }
+        setStatesByFormKey(prev => ({ ...prev, [appliedState.form.formKey]: appliedState }))
         notify('ok', 'Round control updated')
         return
       }
       setState(prev => {
         if (!prev || prev.form.formKey !== currentState.form.formKey) return prev
-        return {
+        const next = {
           ...prev,
           rounds: prev.rounds.map((round, index) => index === roundIndex ? applyRoundControlPatch(round, patch) : round),
         }
+        stateRef.current = next
+        return next
       })
       setStatesByFormKey(prev => {
         const cached = prev[currentState.form.formKey]
         if (!cached) return prev
+        const nextCached = {
+          ...cached,
+          rounds: cached.rounds.map((round, index) => index === roundIndex ? applyRoundControlPatch(round, patch) : round),
+        }
+        statesByFormKeyRef.current = {
+          ...statesByFormKeyRef.current,
+          [currentState.form.formKey]: nextCached,
+        }
         return {
           ...prev,
-          [currentState.form.formKey]: {
-            ...cached,
-            rounds: cached.rounds.map((round, index) => index === roundIndex ? applyRoundControlPatch(round, patch) : round),
-          },
+          [currentState.form.formKey]: nextCached,
         }
       })
       notify('ok', 'Round control updated')
@@ -1189,16 +1540,21 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
           ...patch,
         }),
       })
-      setMoneyDropSpecial(prev => prev ? {
-        ...prev,
-        rounds: prev.rounds.map(round => round.index === roundIndex ? {
-          ...round,
-          confirmed: patch.confirmed === undefined ? round.confirmed : patch.confirmed === true,
-          locked: patch.locked === undefined ? round.locked : patch.locked === true,
-          saving: false,
-          error: '',
-        } : round),
-      } : prev)
+      setMoneyDropSpecial(prev => {
+        if (!prev) return prev
+        const next = {
+          ...prev,
+          rounds: prev.rounds.map(round => round.index === roundIndex ? {
+            ...round,
+            confirmed: patch.confirmed === undefined ? round.confirmed : patch.confirmed === true,
+            locked: patch.locked === undefined ? round.locked : patch.locked === true,
+            saving: false,
+            error: '',
+          } : round),
+        }
+        moneyDropSpecialRef.current = next
+        return next
+      })
       notify('ok', 'Money Drop special control updated')
     } catch (error) {
       notify('err', error instanceof Error ? error.message : String(error))
@@ -1271,6 +1627,8 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     if (!currentState || !canSeeContent || currentState.form.user.toLowerCase().replace(/\s+/g, ' ').trim() !== 'money drop') {
       setMoneyDropSpecial(null)
       setMoneyDropSpecialDraft(['', ''])
+      moneyDropSpecialRef.current = null
+      moneyDropSpecialDraftRef.current = ['', '']
       return
     }
     refreshMoneyDropSpecial(currentState.form.formKey)
@@ -1299,7 +1657,11 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
           refreshMoneyDropSpecial(currentState?.form.formKey)
           return
         }
-        if (data?.ok && data.live) applyMoneyDropSpecialLive(data.live)
+        if (data?.ok && data.live) {
+          const shouldRefreshSheet = hasFreshSavedSignal(data.live)
+          applyMoneyDropSpecialLive(data.live)
+          if (shouldRefreshSheet) refreshMoneyDropSpecial(currentState?.form.formKey)
+        }
       } catch {
         // This is only the fast UI signal. The sheet write remains authoritative.
       } finally {
@@ -1474,7 +1836,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
                 <FileSpreadsheet size={26} />
                 <div>{currentForm.user} is left blank for now.</div>
               </div>
-            ) : loadingState && !currentState ? (
+            ) : (loadingState || (canLoadSelectedForm && !currentState && !stateLoadError)) && !currentState ? (
               <div className="form-empty-state">Loading table...</div>
             ) : !currentState ? (
               <div className="form-empty-state">
@@ -1523,7 +1885,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
                           min={1}
                           max={11}
                           value={fillToRank}
-                          onChange={event => setFillToRank(clampFillToRank(Number(event.target.value)))}
+                          onChange={event => updateFillToRank(Number(event.target.value))}
                           disabled={!isAdmin}
                         />
                       </label>

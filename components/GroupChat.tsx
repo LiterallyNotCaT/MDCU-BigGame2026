@@ -235,6 +235,7 @@ export default function GroupChat({
   const latestSheetIdRef = useRef('')
   const initializedRef = useRef(false)
   const listRef = useRef<HTMLDivElement | null>(null)
+  const initialScrollDoneRef = useRef(false)
   const chatTitle = label ?? (mode === 'report' ? 'Report' : 'Chat')
   const reportStaffOptions = useMemo(() => {
     const seen = new Set<string>()
@@ -414,6 +415,7 @@ export default function GroupChat({
 
   useEffect(() => {
     if (!open) {
+      initialScrollDoneRef.current = false
       return
     }
     const latestByChannel = latestIdsByChannel(viewableMessages, actor)
@@ -434,6 +436,17 @@ export default function GroupChat({
       return next
     })
   }, [actor, channelFilter, open, viewableMessages])
+
+  useEffect(() => {
+    if (!open || initialScrollDoneRef.current || !visibleMessages.length) return
+    const frame = window.requestAnimationFrame(() => {
+      const list = listRef.current
+      if (!list) return
+      list.scrollTop = list.scrollHeight
+      initialScrollDoneRef.current = true
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [open, visibleMessages.length])
 
   useEffect(() => {
     setUnread(Object.values(unreadChannels).some(Boolean))
