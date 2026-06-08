@@ -292,6 +292,9 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
   const didRouteOauthProfile = useRef(false)
   const adminPreloadedTabs = useRef<Set<string>>(new Set())
   const liveVersionByForm = useRef<Record<string, number>>({})
+  const statesByFormKeyRef = useRef<Record<string, ScoringFormState>>({})
+  const formStateRequestSeq = useRef(0)
+  const latestFormStateRequestSeq = useRef<Record<string, number>>({})
   const sheetFreshLoadedForms = useRef<Set<string>>(new Set())
   const dirtyRoundsByForm = useRef<Record<string, Set<number>>>({})
   const submittingRoundsByForm = useRef<Record<string, Set<number>>>({})
@@ -337,6 +340,10 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     setNotice({ type, text })
     window.setTimeout(() => setNotice(null), 4200)
   }
+
+  useEffect(() => {
+    statesByFormKeyRef.current = statesByFormKey
+  }, [statesByFormKey])
 
   const markRoundInRef = (ref: MutableRefObject<Record<string, Set<number>>>, key: string, roundIndex: number) => {
     if (!key || !Number.isInteger(roundIndex)) return
@@ -530,6 +537,10 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
   const loadStatesForTab = useCallback(async (tabName: string, options?: { password?: string; oauth?: boolean; force?: boolean }) => {
     const formKeys = formKeysForTab(tabName)
     if (!formKeys.length) return {}
+    const requestSeq = ++formStateRequestSeq.current
+    formKeys.forEach(key => {
+      latestFormStateRequestSeq.current[key] = requestSeq
+    })
     const data = await fetchJson<{ states: Record<string, ScoringFormState>; errors?: Record<string, string> }>('/api/forms/states', {
       method: 'POST',
       body: JSON.stringify({
@@ -540,8 +551,21 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
       }),
     })
     const nextStates = data.states ?? {}
-    setStatesByFormKey(prev => ({ ...prev, ...nextStates }))
-    return nextStates
+    const forceLoaded = options?.force === true
+    const liveRequestStates = Object.fromEntries(
+      Object.entries(nextStates).filter(([key]) => latestFormStateRequestSeq.current[key] === requestSeq),
+    ) as Record<string, ScoringFormState>
+    const acceptedStates = Object.fromEntries(
+      Object.entries(liveRequestStates).filter(([key]) => forceLoaded || !sheetFreshLoadedForms.current.has(key)),
+    ) as Record<string, ScoringFormState>
+    if (forceLoaded) {
+      Object.keys(acceptedStates).forEach(key => sheetFreshLoadedForms.current.add(key))
+    }
+    if (Object.keys(acceptedStates).length) {
+      statesByFormKeyRef.current = { ...statesByFormKeyRef.current, ...acceptedStates }
+      setStatesByFormKey(prev => ({ ...prev, ...acceptedStates }))
+    }
+    return acceptedStates
   }, [formKeysForTab])
 
   const roundCountForForm = useCallback((form: ScoringFormConfig) => {
@@ -630,7 +654,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
 
   const refreshState = useCallback(async (nextFormKey = formKey, options?: { force?: boolean }) => {
     if (!nextFormKey) return
-    const cachedState = options?.force ? null : statesByFormKey[nextFormKey]
+    const cachedState = options?.force ? null : statesByFormKeyRef.current[nextFormKey]
     if (cachedState) {
       applyFormState(cachedState)
       return
@@ -644,14 +668,10 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
           password: adminSession?.password ?? '',
           force: options?.force === true,
         })
-        const selectedState = loadedStates[nextFormKey]
+        const selectedState = loadedStates[nextFormKey] ?? statesByFormKeyRef.current[nextFormKey]
         if (selectedState) {
           applyFormState(selectedState)
           if (options?.force === true) sheetFreshLoadedForms.current.add(nextFormKey)
-        } else {
-          setState(null)
-          setDraft([])
-          setParticipantsByRound([])
         }
         return
       }
@@ -660,23 +680,23 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
           oauth: true,
           force: options?.force === true,
         })
-        const selectedState = loadedStates[nextFormKey]
+        const selectedState = loadedStates[nextFormKey] ?? statesByFormKeyRef.current[nextFormKey]
         if (selectedState) {
           applyFormState(selectedState)
           if (options?.force === true) sheetFreshLoadedForms.current.add(nextFormKey)
-        } else {
-          setState(null)
-          setDraft([])
-          setParticipantsByRound([])
         }
         return
       }
+      const requestSeq = ++formStateRequestSeq.current
+      latestFormStateRequestSeq.current[nextFormKey] = requestSeq
       const data = await fetchJson<{ state: ScoringFormState }>('/api/forms/state', {
         method: 'POST',
         body: JSON.stringify({ formKey: nextFormKey, force: options?.force === true }),
       })
+      if (latestFormStateRequestSeq.current[nextFormKey] !== requestSeq) return
       applyFormState(data.state)
       if (options?.force === true) sheetFreshLoadedForms.current.add(nextFormKey)
+      statesByFormKeyRef.current = { ...statesByFormKeyRef.current, [nextFormKey]: data.state }
       setStatesByFormKey(prev => ({ ...prev, [nextFormKey]: data.state }))
     } catch (error) {
       const message = error instanceof Error
@@ -687,7 +707,16 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     } finally {
       setLoadingState(false)
     }
-  }, [adminSession, applyFormState, formKey, forms, loadStatesForTab, oauthProfile, statesByFormKey])
+  }, [adminSession, applyFormState, formKey, forms, loadStatesForTab, oauthProfile])
+
+  const selectFormKey = useCallback((nextFormKey: string) => {
+    if (nextFormKey && nextFormKey !== formKey) {
+      const cachedState = statesByFormKeyRef.current[nextFormKey]
+      if (cachedState) applyFormState(cachedState)
+    }
+    setFormKey(nextFormKey)
+    setPasswordInput('')
+  }, [applyFormState, formKey])
 
   useEffect(() => {
     refreshConfig()
@@ -772,10 +801,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
         ...prev,
         [currentForm.formKey]: { role: 'staff', username, password: passwordInput },
       }))
-      if (data.state) {
-        applyFormState(data.state)
-        setStatesByFormKey(prev => ({ ...prev, [currentForm.formKey]: data.state! }))
-      } else if (!currentForm.blank) {
+      if (!currentForm.blank) {
         await refreshState(currentForm.formKey, { force: true })
       }
       setPasswordInput('')
@@ -794,9 +820,9 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
         body: JSON.stringify({ admin: true, password: adminInput }),
       })
       if (!data.ok) throw new Error(data.message || 'Wrong admin password')
-      const statesData = await loadStatesForTab(adminTab, { password: adminInput })
+      const statesData = await loadStatesForTab(adminTab, { password: adminInput, force: true })
       adminPreloadedTabs.current.add(`${adminInput}:${adminTab}`)
-      const selectedState = formKey ? statesData?.[formKey] : null
+      const selectedState = formKey ? statesData?.[formKey] ?? statesByFormKeyRef.current[formKey] : null
       if (selectedState) applyFormState(selectedState)
       setAdminSession({ role: 'admin', username: 'Admin', password: adminInput, authMode: 'password' })
       setAdminInput('')
@@ -816,6 +842,8 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     setSessions({})
     setAdminSession(null)
     adminPreloadedTabs.current.clear()
+    sheetFreshLoadedForms.current.clear()
+    statesByFormKeyRef.current = {}
     setState(null)
     setStatesByFormKey({})
     setDraft([])
@@ -1167,7 +1195,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     const key = `${adminSession.password}:${tab}`
     if (adminPreloadedTabs.current.has(key)) return
     adminPreloadedTabs.current.add(key)
-    loadStatesForTab(tab, { password: adminSession.password }).catch(error => {
+    loadStatesForTab(tab, { password: adminSession.password, force: true }).catch(error => {
       adminPreloadedTabs.current.delete(key)
       notify('err', error instanceof Error ? error.message : String(error))
     })
@@ -1178,7 +1206,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     const key = `oauth:${oauthProfile.email || oauthProfile.nickname}:${tab}`
     if (adminPreloadedTabs.current.has(key)) return
     adminPreloadedTabs.current.add(key)
-    loadStatesForTab(tab, { oauth: true }).catch(error => {
+    loadStatesForTab(tab, { oauth: true, force: true }).catch(error => {
       adminPreloadedTabs.current.delete(key)
       notify('err', error instanceof Error ? error.message : String(error))
     })
@@ -1352,8 +1380,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
                       ?? targetForms.find(form => canOAuthViewForm(oauthProfile, form))
                       ?? targetForms[0]
                     setTab(item)
-                    setFormKey(targetForm?.formKey ?? '')
-                    setPasswordInput('')
+                    selectFormKey(targetForm?.formKey ?? '')
                   }}
                   className={clsx('btn', tab === item ? 'btn-primary' : 'btn-ghost')}
                 >
@@ -1370,8 +1397,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
                   key={form.formKey}
                   type="button"
                   onClick={() => {
-                    setFormKey(form.formKey)
-                    setPasswordInput('')
+                    selectFormKey(form.formKey)
                   }}
                   className={clsx(
                     'form-subtab',

@@ -183,8 +183,9 @@ export async function mergeFormLiveIntoState(state: ScoringFormState | null | un
   }
 
   const liveValues = state.values.map((row, rowIndex) => row.map((cell, columnIndex) => {
-    const values = live.rounds[String(columnIndex)]?.values
-    return values && rowIndex < values.length ? values[rowIndex] : cell
+    const liveRound = live.rounds[String(columnIndex)]
+    const values = liveRound?.values
+    return liveRound?.saving && values && rowIndex < values.length ? values[rowIndex] : cell
   }))
 
   return {
