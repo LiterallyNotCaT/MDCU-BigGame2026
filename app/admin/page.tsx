@@ -32,7 +32,7 @@ const BID_PLAY_MINUTES = 10
 const BET_PLAY_MINUTES = 2
 const EVENT_PLAY_MINUTES = 10
 const DISASTER_SELECT_MINUTES = 3
-type WaveMeta = { king: number | null; disaster: number | null }
+type WaveMeta = { king: number | null; viewingKing: number | null; disaster: number | null }
 const AMBASSADOR_TAB_CONTROLS: Array<{ key: AmbassadorTabKey; label: string }> = [
   { key: 'scoreboard', label: 'Scoreboard' },
   { key: 'map', label: 'Map' },
@@ -99,7 +99,7 @@ function AdminContent() {
       for (let w=1; w<=TOTAL_WAVES; w++) {
         const data = await fetchWaveInputs(w)
         inputs[w] = data.rows
-        meta[w] = { king: data.king, disaster: data.kingDisaster }
+        meta[w] = { king: data.king, viewingKing: data.viewingKing, disaster: data.kingDisaster }
         setActiveDisaster(w, data.kingDisaster)
       }
       setSheetInputs(inputs)
@@ -291,7 +291,7 @@ function AdminContent() {
   const sheetSubmittedBaans = viewedSubmissionRows.filter(row => hasSubmittedForGame(row, submissionGame)).map(r=>r.baan)
   const submittedBaans = Array.from(new Set(sheetSubmittedBaans))
   const localSubmissionsCurrent = getSubmissionsForWave(submissionWave)
-  const viewedWaveMeta = waveMeta[submissionWave] ?? { king: null, disaster: null }
+  const viewedWaveMeta = waveMeta[submissionWave] ?? { king: null, viewingKing: null, disaster: null }
   const ambassadorVisibility = normalizeAmbassadorVisibility(gs.ambassadorVisibility)
   const chatPermissions = normalizeChatPermissions(gs.chatPermissions)
   const setAmbassadorVisibility = (patch: Parameters<typeof normalizeAmbassadorVisibility>[0]) => {
@@ -399,7 +399,7 @@ function AdminContent() {
                         <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
                           <div className="text-label">Viewing wave king</div>
                           <div className="text-sm font-bold text-blue-800">
-                            {viewedWaveMeta.king ? HOUSE_NAMES[viewedWaveMeta.king] : '-'}
+                            {viewedWaveMeta.viewingKing ? HOUSE_NAMES[viewedWaveMeta.viewingKing] : '-'}
                           </div>
                         </div>
                         <div className={clsx('rounded-lg border px-3 py-2', viewedWaveMeta.disaster ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50')}>
@@ -456,9 +456,13 @@ function AdminContent() {
                         </button>
                       ))}
                     </div>
-                    <GameMap ownership={sheetOwnership.ownership} filterDisaster={filterDis}
+                    <GameMap ownership={sheetOwnership.ownership}
+                      disasterOwnership={sheetOwnership.disasterOwnership}
+                      eradicatedOwnership={sheetOwnership.eradicatedOwnership}
+                      filterDisaster={filterDis}
                       kingDisaster={getActiveDisasterForWave(mapWave)}
-                      currentKing={waveMeta[mapWave]?.king ?? null}
+                      currentKing={waveMeta[mapWave]?.viewingKing ?? null}
+                      kingOwner={waveMeta[mapWave]?.king ?? null}
                       readOnly compact />
                   </div>
                 )}

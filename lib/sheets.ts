@@ -67,6 +67,35 @@ async function fetchWaveRangeGViz(wave: number, range?: string): Promise<any[][]
   }
 }
 
+function kingFromResultRows(rows: unknown[][]): number | null {
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i] ?? []
+    const flag = parseFloat(String(row?.[6] ?? '').replace(/,/g, '').trim())
+    if (flag !== 1) continue
+    const baan = parseInt(String(row?.[0] ?? '').trim())
+    if (Number.isInteger(baan) && baan >= 1 && baan <= 12) return baan
+    const rowMappedBaan = i + 1
+    if (rowMappedBaan >= 1 && rowMappedBaan <= 12) return rowMappedBaan
+  }
+  return null
+}
+
+async function fetchWaveKingOwner(wave: number): Promise<number | null> {
+  const rows = await fetchWaveRangeGViz(wave, 'A5:G16')
+  return kingFromResultRows(rows)
+}
+
+async function fetchWaveViewingKing(wave: number): Promise<number | null> {
+  const rows = await fetchWaveRangeGViz(wave, 'H20')
+  return parseHouseNumber(rows?.[0]?.[0])
+}
+
+function parseHouseNumber(value: unknown) {
+  const baan = parseInt(String(value ?? '').trim())
+  if (Number.isInteger(baan) && baan >= 1 && baan <= 12) return baan
+  return null
+}
+
 async function fetchGidRangeGViz(gid: string, range?: string): Promise<any[][]> {
   const rangeQuery = range ? `&range=${encodeURIComponent(range)}` : ''
   const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&gid=${encodeURIComponent(gid)}${rangeQuery}&t=${Date.now()}`
@@ -143,7 +172,7 @@ export interface WaveInputRow {
   hasBidInput: boolean
 }
 
-export async function fetchWaveInputs(wave: number): Promise<{ rows: WaveInputRow[]; king: number | null; kingDisaster: number | null }> {
+export async function fetchWaveInputs(wave: number): Promise<{ rows: WaveInputRow[]; king: number | null; viewingKing: number | null; kingDisaster: number | null }> {
   const rows = await fetchWaveRangeGViz(wave, 'A5:U16')
   const numberAt = (row: string[], idx: number) => parseFloat(String(row[idx] ?? 0)) || 0
   const textAt = (row: string[], idx: number) => String(row[idx] ?? '').trim()
@@ -204,15 +233,14 @@ export async function fetchWaveInputs(wave: number): Promise<{ rows: WaveInputRo
   const parsed = Array.from(
     parsedRows.reduce((byBaan, row) => byBaan.set(row.baan, row), new Map<number, WaveInputRow>()).values()
   ).sort((a, b) => a.baan - b.baan)
-  const [kingCell, disasterCell] = await Promise.all([
-    fetchWaveRangeGViz(wave, 'H20'),
+  const [king, viewingKing, infoCell] = await Promise.all([
+    fetchWaveKingOwner(wave),
+    fetchWaveViewingKing(wave),
     fetchWaveRangeGViz(wave, 'H22'),
   ])
-  let king: number | null = parseInt(String(kingCell?.[0]?.[0] ?? '').trim())
-  let kingDisaster: number | null = parseInt(String(disasterCell?.[0]?.[0] ?? '').trim())
-  if (isNaN(king)) king = null
+  let kingDisaster: number | null = parseInt(String(infoCell?.[0]?.[0] ?? '').trim())
   if (isNaN(kingDisaster)) kingDisaster = null
-  return { rows: parsed, king, kingDisaster }
+  return { rows: parsed, king, viewingKing, kingDisaster }
 }
 
 export interface GroupChatMessage {
@@ -486,33 +514,15 @@ export async function fetchLieHistoryWave(wave: number): Promise<LieHistoryCell[
 }
 
 // ── READ: King info for a wave ─────────────────────────────
-// INFO section in sheet: H20 = current king, H22 = king disaster
-export async function fetchWaveInfo(wave: number): Promise<{ king: number | null; disaster: number | null }> {
-  const rows = await fetchWaveGViz(wave)
-  let king: number | null = parseInt(rows?.[19]?.[7] ?? '')
-  let disaster: number | null = parseInt(rows?.[21]?.[7] ?? '')
-  if (isNaN(king)) king = null
-  if (isNaN(disaster)) disaster = null
-  const firstNumber = (row: string[]) => {
-    for (const idx of [7, 6, 5, 4, 3, 2, 1, 0]) {
-      const v = parseInt(String(row[idx] ?? ''))
-      if (!isNaN(v)) return v
-    }
-    return null
-  }
-  for (const row of rows) {
-    if (king != null && disaster != null) break
-    const joined = row.join(' ').toLowerCase()
-    if (joined.includes('king') && king == null) {
-      const v = firstNumber(row)
-      if (v != null) king = v
-    }
-    if (joined.includes('disaster') && disaster == null) {
-      const v = firstNumber(row)
-      if (v != null) disaster = v
-    }
-  }
-  return { king, disaster }
+// KING island owner comes from rows 5-16. Current viewing king comes from H20.
+export async function fetchWaveInfo(wave: number): Promise<{ king: number | null; viewingKing: number | null; disaster: number | null }> {
+  const [king, viewingKing, disasterCell] = await Promise.all([
+    fetchWaveKingOwner(wave),
+    fetchWaveViewingKing(wave),
+    fetchWaveRangeGViz(wave, 'H22'),
+  ])
+  const disaster = parseHouseNumber(disasterCell?.[0]?.[0])
+  return { king, viewingKing, disaster }
 }
 
 // ── WRITE payload type ─────────────────────────────────────

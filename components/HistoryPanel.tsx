@@ -8,6 +8,9 @@ interface HistoryDetailLine {
   area?: string
   text: string
   deleted?: boolean
+  danger?: boolean
+  erased?: boolean
+  noColon?: boolean
 }
 
 interface HistoryEntry {
@@ -160,13 +163,13 @@ export default function HistoryPanel({
                         {entry.detailLines && entry.detailLines.length > 0 && (
                           <div className="history-entry-detail-lines">
                             {entry.detailLines.map((line, lineIndex) => (
-                              <div key={`${line.area ?? 'detail'}-${lineIndex}`} className="history-entry-detail-line">
+                              <div key={`${line.area ?? 'detail'}-${lineIndex}`} className={clsx('history-entry-detail-line', line.danger && 'is-danger', line.erased && 'is-erased')}>
                                 {line.area && (
                                   <>
-                                    <span className={clsx('history-entry-area-name', line.deleted && 'is-deleted')}>
+                                    <span className={clsx('history-entry-area-name', line.deleted && 'is-deleted', line.erased && 'is-erased')}>
                                       {line.area}
                                     </span>
-                                    <span>:&nbsp;</span>
+                                    <span>{line.erased || line.noColon ? '\u00a0' : ':\u00a0'}</span>
                                   </>
                                 )}
                                 <span>{line.text}</span>

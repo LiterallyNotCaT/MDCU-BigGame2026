@@ -410,6 +410,7 @@ function BiddingGame({ baan }: { baan:number }) {
   const [balance,   setBalance]   = useState(0)
   const [isKing,    setIsKing]    = useState(false)
   const [currentKing, setCurrentKing] = useState<number | null>(null)
+  const [kingOwner, setKingOwner] = useState<number | null>(null)
   const [isSaved,   setIsSaved]   = useState(true)
   const [savedAt,   setSavedAt]   = useState('')
   const [saveMessage, setSaveMessage] = useState('')
@@ -457,6 +458,8 @@ function BiddingGame({ baan }: { baan:number }) {
   const canSeeCurrentOwnership = gs.showResults === true || canSelectKingDisaster
   const sheetOwnership = useWaveOwnership(gs.currentWave)
   const visibleOwnership = canSeeCurrentOwnership ? sheetOwnership.ownership : {}
+  const visibleDisasterOwnership = canSeeCurrentOwnership ? sheetOwnership.disasterOwnership : {}
+  const visibleEradicatedOwnership = canSeeCurrentOwnership ? sheetOwnership.eradicatedOwnership : {}
   const activeSheetDisaster = getActiveDisasterForWave(gs.currentWave)
   const mapKingDisaster = isSelectDisasterPhase && canChooseKingDisaster
     ? kingDis
@@ -543,10 +546,11 @@ function BiddingGame({ baan }: { baan:number }) {
     })
   }, [draftReady, draftKey, isBetMode, isSelectDisasterPhase, betTarget, betAmount, kingDis, cart, isSaved])
 
-  const applySheetInput = useCallback((row: WaveInputRow | null, info: { king: number | null; kingDisaster: number | null }) => {
+  const applySheetInput = useCallback((row: WaveInputRow | null, info: { king: number | null; viewingKing: number | null; kingDisaster: number | null }) => {
     setSheetInput(row)
-    setCurrentKing(info.king)
-    setIsKing(info.king === baan)
+    setCurrentKing(info.viewingKing)
+    setKingOwner(info.king)
+    setIsKing(info.viewingKing === baan)
     setActiveDisaster(gs.currentWave, info.kingDisaster)
     setSheetBetSpend(row?.betAmount || 0)
     if (row) setBalance(row.balance || 0)
@@ -556,7 +560,7 @@ function BiddingGame({ baan }: { baan:number }) {
     const mayHydrateFromSheet = !hasLocalDraft && !saveInFlight.current && isSaved && !isSyncing
 
     if (state.gamePhase === 'select-disaster') {
-      if (!(state.isOpen && info.king === baan && !isSaved)) {
+      if (!(state.isOpen && info.viewingKing === baan && !isSaved)) {
         setKingDis(info.kingDisaster)
       }
       if (mayHydrateFromSheet) {
@@ -597,7 +601,7 @@ function BiddingGame({ baan }: { baan:number }) {
       const data = await fetchWaveInputs(wave)
       if (wave !== getGameState().currentWave) return
       const row = data.rows.find(item => item.baan === baan) ?? null
-      applySheetInput(row, { king: data.king, kingDisaster: data.kingDisaster })
+      applySheetInput(row, { king: data.king, viewingKing: data.viewingKing, kingDisaster: data.kingDisaster })
     } catch (e) {
       console.error(e)
     }
@@ -642,9 +646,10 @@ function BiddingGame({ baan }: { baan:number }) {
       const state = getGameState()
       const wave = state.currentWave
       const info = await fetchWaveInfo(wave)
-      setCurrentKing(info.king)
-      setIsKing(info.king === baan)
-      if (!(state.isOpen && state.gamePhase === 'select-disaster' && info.king === baan && !isSaved)) {
+      setCurrentKing(info.viewingKing)
+      setKingOwner(info.king)
+      setIsKing(info.viewingKing === baan)
+      if (!(state.isOpen && state.gamePhase === 'select-disaster' && info.viewingKing === baan && !isSaved)) {
         setKingDis(info.disaster)
       }
       setActiveDisaster(wave, info.disaster)
@@ -885,7 +890,9 @@ function BiddingGame({ baan }: { baan:number }) {
           <div className={clsx('wire-pill-row', isBetMode && 'wire-pill-row-bet', isEventMode && 'wire-pill-row-event')}>
             <div className="wire-pill-status-group">
               <div className="wire-pill wire-pill-game">{isEventMode ? 'Event game' : isBetMode ? 'Bet game' : 'Bid game'}</div>
-              {!isBetMode && !isEventMode && <div className="wire-pill wire-pill-king">King : {currentKing ? HOUSE_NAMES[currentKing] : '-'}</div>}
+              {!isBetMode && !isEventMode && currentKing && (
+                <div className="wire-pill wire-pill-king">King : {HOUSE_NAMES[currentKing]}</div>
+              )}
               <div className={clsx('wire-pill-state badge', gs.isOpen?'badge-green':'badge-red')}>
                 <span className={clsx('status-dot', gs.isOpen?'online':'offline')} />
                 {gs.isOpen?'OPEN':'CLOSED'}
@@ -975,11 +982,14 @@ function BiddingGame({ baan }: { baan:number }) {
                   ) : (
                     <>
                     <GameMap ownership={visibleOwnership} selected={selectedAreas}
+                      disasterOwnership={visibleDisasterOwnership}
+                      eradicatedOwnership={visibleEradicatedOwnership}
                       onSelect={handleSelect} filterDisaster={filterDis}
                       readOnly={!canEditBid}
                       kingDisaster={mapKingDisaster}
                       kingDisasterTone={isSelectDisasterPhase && canChooseKingDisaster ? 'selection' : 'result'}
                       currentKing={canSeeCurrentOwnership ? currentKing : null}
+                      kingOwner={canSeeCurrentOwnership ? kingOwner : null}
                       compact />
                     </>
                   )}

@@ -3,7 +3,7 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import clsx from 'clsx'
 import HistoryPanel from './HistoryPanel'
-import { DISASTER_AREAS, HOUSE_NAMES, SHEET_ID, TOTAL_WAVES, getWaveSheetQuery } from '@/lib/constants'
+import { HOUSE_NAMES, SHEET_ID, TOTAL_WAVES, getWaveSheetQuery } from '@/lib/constants'
 import { withCompetitionRanks } from '@/lib/ranking'
 import { getGameState, subscribeStore } from '@/lib/store'
 import { X } from 'lucide-react'
@@ -14,6 +14,9 @@ interface HistoryDetailLine {
   area?: string
   text: string
   deleted?: boolean
+  danger?: boolean
+  erased?: boolean
+  noColon?: boolean
 }
 
 interface HistoryEntry {
@@ -42,6 +45,8 @@ interface MiniGameRank {
 }
 
 type RankingModalKind = 'bet-return' | 'ladder'
+type SheetCell = { v?: unknown; f?: unknown } | null | undefined
+type SheetRow = { c?: SheetCell[] }
 
 interface FinanceHistoryProps {
   initialBaan?: number | null
@@ -65,7 +70,7 @@ const parseGViz = (text: string): any[] => {
 }
 
 const fetchSheetRows = async (query: string) => {
-  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&${query}`
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&${query}&t=${Date.now()}`
   const text = await (await fetch(url, { cache: 'no-store' })).text()
   return parseGViz(text)
 }
@@ -172,14 +177,57 @@ const fetchEventRank = async (wave: number, baan: number) => {
   }
 }
 
-const affectedAreasFor = (disaster: number | null) => {
-  const rule = disaster ? DISASTER_AREAS[disaster] : null
-  const affected = new Set<string>()
-  if (!rule) return affected
-  ;(['A', 'B', 'C'] as const).forEach(group => {
-    rule[group].forEach(n => affected.add(`${group}${n}`))
+const parseAreaList = (value: unknown) => {
+  const matches = String(value ?? '').toUpperCase().match(/[ABC]\s*[1-9]/g) ?? []
+  return Array.from(new Set(matches.map(area => area.replace(/\s+/g, ''))))
+}
+
+const cellsFor = (row: unknown): SheetCell[] => {
+  if (!row || typeof row !== 'object' || !('c' in row)) return []
+  const cells = (row as SheetRow).c
+  return Array.isArray(cells) ? cells : []
+}
+
+const parseWaveOwnershipSummary = (rows: unknown[], eradicatedRows: unknown[] = []) => {
+  const ownership: Record<string, number> = {}
+  const disasterOwnership: Record<string, number> = {}
+  const eradicatedOwnership: Record<string, number> = {}
+  const disasterAreasByBaan: Record<number, string[]> = {}
+  const eradicatedAreasByBaan: Record<number, string[]> = {}
+
+  rows.forEach(row => {
+    const cells = cellsFor(row)
+    const baan = parseInt(String(cellValue(cells?.[0]) ?? ''))
+    if (!Number.isInteger(baan) || baan < 1 || baan > 12) return
+
+    parseAreaList(cellValue(cells?.[1])).forEach(area => {
+      ownership[area] = baan
+    })
+
+    const disasterAreas = parseAreaList(cellValue(cells?.[4]))
+    if (disasterAreas.length) disasterAreasByBaan[baan] = disasterAreas
+    disasterAreas.forEach(area => {
+      disasterOwnership[area] = baan
+    })
   })
-  return affected
+
+  eradicatedRows.forEach(row => {
+    const cells = cellsFor(row)
+    const baan = parseInt(String(cellValue(cells?.[1]) ?? ''))
+    if (!Number.isInteger(baan) || baan < 1 || baan > 12) return
+    const eradicatedAreas = parseAreaList(cellValue(cells?.[0]))
+    if (eradicatedAreas.length) eradicatedAreasByBaan[baan] = eradicatedAreas
+    eradicatedAreas.forEach(area => {
+      eradicatedOwnership[area] = baan
+    })
+  })
+
+  return { ownership, disasterOwnership, eradicatedOwnership, disasterAreasByBaan, eradicatedAreasByBaan }
+}
+
+const parseCurrentKingHouse = (rows: unknown[]) => {
+  const infoKing = parseSheetNumber(cellValue(cellsFor(rows?.[0])?.[0]))
+  return infoKing !== null && Number.isInteger(infoKing) && infoKing >= 1 && infoKing <= 12 ? infoKing : null
 }
 
 const formatPercent = (returnAmount: number, spent: number) => {
@@ -188,9 +236,9 @@ const formatPercent = (returnAmount: number, spent: number) => {
   return `${Number.isInteger(pct) ? pct.toFixed(0) : pct.toFixed(1)}%`
 }
 
-const disownedGroupFromRows = (rows: any[]) => {
+const eradicatedGroupFromRows = (rows: any[]) => {
   const row20 = rows?.[19]?.c ?? []
-  return String(row20?.[14]?.v ?? row20?.[15]?.v ?? row20?.[405]?.v ?? '').trim()
+  return String(cellValue(row20?.[14]) ?? '').trim()
 }
 
 const bonusIslandFromRows = (rows: any[]) => {
@@ -198,11 +246,11 @@ const bonusIslandFromRows = (rows: any[]) => {
   return String(cellValue(row20?.[14]) ?? '').trim()
 }
 
-const fetchDisownedGroup = async (wave: number, rows: any[]) => {
-  const fromVisibleColumns = disownedGroupFromRows(rows)
+const fetchEradicatedGroup = async (wave: number, rows: any[]) => {
+  const fromVisibleColumns = eradicatedGroupFromRows(rows)
   if (fromVisibleColumns) return fromVisibleColumns
-  const opRows = await fetchSheetRows(`${getWaveSheetQuery(wave)}&range=${encodeURIComponent('OP20:OP20')}`)
-  return String(opRows?.[0]?.c?.[0]?.v ?? '').trim()
+  const oRows = await fetchSheetRows(`${getWaveSheetQuery(wave)}&range=${encodeURIComponent('O20:O20')}`)
+  return String(cellValue(oRows?.[0]?.c?.[0]) ?? '').trim()
 }
 
 const fetchBonusIslandNames = async (wave: number, rows: any[]) => {
@@ -277,10 +325,13 @@ function FinanceHistory({
       let morningAdded = false
 
       for (const wave of wavesToRead) {
-        const [rows, islandRangeRows, financeRangeRows] = await Promise.all([
+        const [rows, islandRangeRows, financeRangeRows, ownershipRangeRows, eradicatedRangeRows, currentKingRows] = await Promise.all([
           fetchSheetRows(getWaveSheetQuery(wave)),
           fetchSheetRows(`${getWaveSheetQuery(wave)}&range=${encodeURIComponent('A5:P16')}`),
           fetchSheetRows(`${getWaveSheetQuery(wave)}&range=${encodeURIComponent('A5:AB16')}`),
+          fetchSheetRows(`${getWaveSheetQuery(wave)}&range=${encodeURIComponent('J20:N31')}`),
+          wave === 4 ? fetchSheetRows(`${getWaveSheetQuery(wave)}&range=${encodeURIComponent('I20:J31')}`) : Promise.resolve([]),
+          fetchSheetRows(`${getWaveSheetQuery(wave)}&range=${encodeURIComponent('H20:H20')}`),
         ])
         const row = rows.find((r: any) => parseInt(String(cellValue(r?.c?.[0]) ?? '')) === selectedBaan)
         if (!row) continue
@@ -345,11 +396,8 @@ function FinanceHistory({
           morningAdded = true
         }
 
-        const waveKing = parseInt(String(cellValue(rows?.[19]?.c?.[7]) ?? ''))
-        const kingHouse = isNaN(waveKing) ? null : waveKing
-        const waveDisasterRaw = parseInt(String(cellValue(rows?.[21]?.c?.[7]) ?? ''))
-        const waveDisaster = isNaN(waveDisasterRaw) ? null : waveDisasterRaw
-        const affectedAreas = affectedAreasFor(waveDisaster)
+        const ownershipSummary = parseWaveOwnershipSummary(ownershipRangeRows, eradicatedRangeRows)
+        const kingHouse = parseCurrentKingHouse(currentKingRows)
         const winnerRow = rows.find((r: any) => String(cellValue(r?.c?.[6]) ?? '').trim() === '1')
         const winningKingHouse = winnerRow ? parseInt(String(cellValue(winnerRow?.c?.[0]) ?? '')) : null
         const winningKingBid = winnerRow ? parseSheetNumber(cellValue(winnerRow?.c?.[5])) ?? 0 : 0
@@ -362,7 +410,7 @@ function FinanceHistory({
         const adminLabel = financeTextAt(26)
         const adminAmount = financeNumberAt(27)
         const hasAdminAmount = hasFinanceCellValue(27)
-        const disownedGroup = wave === 4 ? await fetchDisownedGroup(wave, rows) : ''
+        const eradicatedGroup = wave === 4 ? await fetchEradicatedGroup(wave, rows) : ''
         const bonusIslandNames = wave === 2 ? await fetchBonusIslandNames(wave, rows) : ''
 
         const betHouse = textAt(2)
@@ -394,6 +442,7 @@ function FinanceHistory({
 
         const islandBidLines: string[] = []
         const islandReturnLines: HistoryDetailLine[] = []
+        const islandBidAreas = new Set<string>()
         let islandSpentTotal = 0
         let islandReturnTotal = 0
         ;[
@@ -407,25 +456,60 @@ function FinanceHistory({
           const area = exactArea || areaAt(nameIdx, amountIdx, returnIdx)
           const spent = hasTextValue(islandRangeRead(rangeAmountIdx)) ? islandRangeNumberAt(rangeAmountIdx) : numberAt(amountIdx)
           const got = hasTextValue(islandRangeRead(rangeReturnIdx)) ? islandRangeNumberAt(rangeReturnIdx) : numberAt(returnIdx)
+          if (area) islandBidAreas.add(area)
           if (area || spent) {
             islandBidLines.push(`${area || '-'}: ${spent.toLocaleString()}`)
             islandSpentTotal += spent
           }
           if (area || spent || got) {
-            const disasteredWin = got > 0 && Boolean(area) && affectedAreas.has(area)
-            const statusText = got <= 0
+            const currentOwner = area ? ownershipSummary.ownership[area] ?? 0 : 0
+            const disasterOwner = area ? ownershipSummary.disasterOwnership[area] ?? 0 : 0
+            const wonBid = got > 0 || currentOwner === selectedBaan || disasterOwner === selectedBaan
+            const disasteredWin = Boolean(area) && wonBid && disasterOwner === selectedBaan
+            const statusText = !wonBid
               ? 'ประมูลแพ้'
               : disasteredWin
-                ? `ประมูลชนะ แต่โดน disaster${kingHouse ? ` โดยบ้าน ${kingHouse}` : ''}`
+                ? kingHouse
+                  ? `ประมูลชนะ แต่โดนภัยพิบัติโดยบ้าน ${kingHouse}`
+                  : 'ประมูลชนะ แต่โดนภัยพิบัติ'
                 : 'ประมูลชนะ'
             islandReturnLines.push({
               area: area || '-',
               text: `${got.toLocaleString()} (${statusText})`,
               deleted: disasteredWin,
+              danger: disasteredWin,
             })
             islandReturnTotal += got
           }
         })
+        const priorDisasterAreasForBaan = (ownershipSummary.disasterAreasByBaan[selectedBaan] ?? [])
+          .filter(area => !islandBidAreas.has(area))
+        if (priorDisasterAreasForBaan.length) {
+          islandReturnLines.push({
+            area: priorDisasterAreasForBaan.join(', '),
+            text: kingHouse ? `ของคุณโดนภัยพิบัติโดยบ้าน ${kingHouse}` : 'ของคุณโดนภัยพิบัติ',
+            deleted: true,
+            danger: true,
+            noColon: true,
+          })
+        }
+        const eradicatedAreasForBaan = ownershipSummary.eradicatedAreasByBaan[selectedBaan] ?? []
+        if (wave === 4 && (eradicatedGroup || eradicatedAreasForBaan.length)) {
+          if (eradicatedGroup) {
+            islandReturnLines.push({
+              text: `จากเกม MoneyDrop พื้นที่ ${eradicatedGroup} จะถูกลบความเป็นเจ้าของ`,
+              erased: true,
+            })
+          }
+          if (eradicatedAreasForBaan.length) {
+            islandReturnLines.push({
+              area: eradicatedAreasForBaan.join(', '),
+              text: 'ของคุณถูกลบความเป็นเจ้าของ',
+              deleted: true,
+              erased: true,
+            })
+          }
+        }
         if (islandBidLines.length) {
           nextEntries.push({
             order: wave * 100 + 30,
@@ -537,18 +621,6 @@ function FinanceHistory({
             })
           }
 
-          if (wave === 4 && disownedGroup) {
-            nextEntries.push({
-              order: wave * 100 + 49,
-              wave,
-              label: 'พื้นที่ของคุณโดนภัยพิบัติจาก King!',
-              detail: disownedGroup,
-              amount: 0,
-              type: 'disaster',
-              revealResult: isCurrentWave,
-              hideAmount: true,
-            })
-          }
         }
 
         if (revealWave && (betHouse || betAmountSheet || betReturn)) {

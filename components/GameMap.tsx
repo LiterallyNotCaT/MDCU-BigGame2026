@@ -5,6 +5,8 @@ import { HOUSE_COLORS, DISASTER_AREAS } from '@/lib/constants'
 
 interface MapProps {
   ownership:       Record<string, number>
+  disasterOwnership?: Record<string, number>
+  eradicatedOwnership?: Record<string, number>
   selected?:       string[]
   onSelect?:       (area: string) => void
   filterDisaster?: number | null
@@ -12,6 +14,7 @@ interface MapProps {
   kingDisaster?:   number | null
   kingDisasterTone?: 'selection' | 'result'
   currentKing?:    number | null
+  kingOwner?:      number | null
   compact?:        boolean
 }
 
@@ -45,10 +48,12 @@ function getAffected(dn: number | null): Set<string> {
 }
 
 function GameMap({
-  ownership, selected=[], onSelect, filterDisaster, readOnly, kingDisaster, kingDisasterTone = 'result', currentKing = null, compact,
+  ownership, disasterOwnership = {}, eradicatedOwnership = {}, selected=[], onSelect, filterDisaster, readOnly, kingDisaster, kingDisasterTone = 'result', currentKing = null, kingOwner = null, compact,
 }: MapProps) {
   const filterSet = filterDisaster != null ? getAffected(filterDisaster) : null
+  const isFilterMode = filterSet != null
   const kingSet   = kingDisaster   != null ? getAffected(kingDisaster)   : null
+  const hasSheetDisasterOwnership = Object.keys(disasterOwnership).length > 0
 
   const tileClass = compact ? 'map-tile-deluxe-compact' : 'map-tile-deluxe-regular'
   const gridTileSize = compact
@@ -57,9 +62,9 @@ function GameMap({
 
   return (
     <div className={clsx('game-map select-none', compact ? 'game-map-compact' : 'game-map-regular')}>
-      {kingDisaster != null && !filterDisaster && (
+      {kingDisaster != null && currentKing != null && !filterDisaster && (
         <div className="map-king-disaster-notice">
-          <span>King บ้าน {currentKing ?? '-'} เลือก disaster {kingDisaster}</span>
+          <span>King บ้าน {currentKing} เลือก disaster {kingDisaster}</span>
         </div>
       )}
 
@@ -95,25 +100,33 @@ function GameMap({
             >
               {group.areas.map(area => {
                 const isKingIsland = area === 'KING'
-                const owner       = isKingIsland ? currentKing ?? ownership[area] ?? 0 : ownership[area] || 0
+                const currentOwner = isKingIsland ? kingOwner ?? currentKing ?? ownership[area] ?? 0 : ownership[area] || 0
+                const disasterOwner = isKingIsland ? 0 : disasterOwnership[area] || 0
+                const eradicatedOwner = isKingIsland ? 0 : eradicatedOwnership[area] || 0
+                const owner       = eradicatedOwner || disasterOwner || currentOwner
+                const isSheetDisastered = disasterOwner > 0
+                const isEradicated = eradicatedOwner > 0
                 const isSelected  = selected.includes(area)
                 const disasters   = getAreaDisasters(area)
                 const isFiltered  = filterSet?.has(area) ?? false
-                const isKingHit   = kingSet?.has(area)   ?? false
-                const dimmed      = filterSet != null && !isFiltered
+                const isKingHitByRule = kingSet?.has(area) ?? false
+                const isKingHit   = isKingHitByRule && (kingDisasterTone === 'selection' || !hasSheetDisasterOwnership)
+                const dimmed      = isFilterMode && !isFiltered
 
                 // Compute visual state
                 let bg        = isKingIsland ? 'rgba(245,158,11,0.12)' : 'rgba(19,25,34,0.9)'
                 let border    = 'rgba(255,255,255,0.06)'
-                let textColor = isKingIsland ? '#b45309' : '#475569'
+                let textColor = isKingIsland ? '#744b00' : '#111827'
 
-                if (owner > 0 && !dimmed) {
+                if (owner > 0) {
                   const c = HOUSE_COLORS[owner]
-                  bg = `${c}1a`; border = `${c}55`; textColor = c
+                  bg = `${c}1a`
+                  border = `${c}55`
+                  textColor = isKingIsland ? '#744b00' : '#111827'
                 }
-                if (filterSet != null) {
-                  if (isFiltered)  { bg='#111827'; border='#fde047'; textColor='#ffffff' }
-                  if (dimmed)      { bg='rgba(226,232,240,0.52)'; border='rgba(148,163,184,0.26)'; textColor='#94a3b8' }
+                if (isFilterMode && isFiltered) {
+                  border = '#06b6d4'
+                  textColor = '#111827'
                 }
                 if (isKingHit && !filterSet) {
                   if (kingDisasterTone === 'selection') {
@@ -126,11 +139,21 @@ function GameMap({
                     textColor = '#450a0a'
                   }
                 }
+                if (isSheetDisastered) {
+                  bg = '#fee2e2'
+                  border = '#991b1b'
+                  textColor = '#b91c1c'
+                }
+                if (isEradicated) {
+                  bg = '#dbeafe'
+                  border = '#1d4ed8'
+                  textColor = '#1d4ed8'
+                }
                 if (isSelected) {
-                  const preserveHighlight = isFiltered || isKingHit
+                  const preserveHighlight = isFiltered || isKingHit || isSheetDisastered || isEradicated
                   bg = preserveHighlight ? bg : isKingIsland ? 'rgba(245,158,11,0.32)' : 'rgba(245,158,11,0.15)'
                   border = preserveHighlight ? border : 'rgba(245,158,11,0.86)'
-                  textColor = preserveHighlight ? textColor : '#92400e'
+                  textColor = preserveHighlight ? textColor : isKingIsland ? '#744b00' : '#111827'
                 }
 
                 return (
@@ -141,33 +164,38 @@ function GameMap({
                       area,
                       owner ? `บ้าน ${owner}` : 'ว่าง',
                       isKingIsland ? 'King island' : '',
+                      isEradicated ? 'Eradicated by MoneyDrop' : '',
                       disasters.length ? 'Disaster ' + disasters.join(', ') : ''
                     ].filter(Boolean).join(' · ')}
                     className={clsx(
                       tileClass,
                       'map-tile-deluxe relative flex flex-col items-center justify-center transition-all duration-150',
-                      !readOnly && !dimmed && 'map-tile cursor-pointer',
+                      !readOnly && 'map-tile cursor-pointer',
                       readOnly && 'cursor-default',
                       isSelected && 'map-tile-selected ring-2 ring-yellow-300/80 ring-offset-2 ring-offset-[#07090f]',
                       isKingIsland && 'map-tile-king',
+                      isFilterMode && 'map-tile-filter-mode',
+                      dimmed && 'map-tile-filter-dim',
                       isFiltered && 'map-tile-filter-hit',
+                      isSheetDisastered && 'map-tile-sheet-disastered',
+                      isEradicated && 'map-tile-eradicated',
                       isKingHit && !filterSet && kingDisasterTone === 'selection' && 'map-tile-king-hit-selection',
                       isKingHit && !filterSet && kingDisasterTone === 'result' && 'map-tile-king-hit-result',
                     )}
-                    style={{ background: bg, border: `1.5px solid ${border}` }}>
+                    style={{ background: bg, border: `1.5px solid ${border}`, '--map-filter-hit-bg': bg } as React.CSSProperties}>
 
-                    {owner > 0 && !dimmed && (
-                      <span className="map-tile-owner font-mono text-[10px] font-black"
+                    {owner > 0 && (
+                      <span className={clsx('map-tile-owner font-mono text-[10px] font-black', isSheetDisastered && 'is-disastered', isEradicated && 'is-eradicated')}
                         style={{ '--owner-color': HOUSE_COLORS[owner], background: `${HOUSE_COLORS[owner]}18` } as React.CSSProperties}>
                         บ้าน {owner}
                       </span>
                     )}
 
-                    <span className="map-tile-area font-display font-black text-base leading-none" style={{ color: textColor }}>
+                    <span className={clsx('map-tile-area font-display font-black text-base leading-none', isSheetDisastered && 'is-disastered', isEradicated && 'is-eradicated')} style={{ color: textColor }}>
                       {isKingIsland ? 'KING' : area}
                     </span>
 
-                    {disasters.length > 0 && !dimmed && (
+                    {disasters.length > 0 && (
                       <div className="map-tile-disasters flex max-w-full justify-center gap-px overflow-hidden">
                         <span className="rounded bg-slate-100 px-1 text-[9px] font-bold leading-tight text-slate-700">
                           {disasters.slice(0,3).join(',')}

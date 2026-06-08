@@ -71,9 +71,12 @@ const parseCSVData = (csvText: string) => {
   const scores: Record<string, number> = {};
   const lines = csvText.trim().split('\n');
   
-  lines.forEach(line => {
+  lines.forEach((line, index) => {
     const cols = parseCSVLine(line);
-    if (cols.length >= 2) {
+    if (cols.length === 1) {
+      const score = parseInt(cols[0].replace(/,/g, '').trim(), 10);
+      if (!isNaN(score)) scores[String(index + 1)] = score;
+    } else if (cols.length >= 2) {
       const houseIdStr = cols[0].trim();
       const scoreStr = cols[1].replace(/,/g, '').trim();
       const houseNumMatch = houseIdStr.match(/\d+/);

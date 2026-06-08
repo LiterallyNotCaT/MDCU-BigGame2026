@@ -33,6 +33,7 @@ function AmbassadorContent() {
   const [selWave,     setSelWave]     = useState(() => getGameState().currentWave)
   const [filterDis,   setFilterDis]   = useState<number|null>(null)
   const [currentKing, setCurrentKing]  = useState<number|null>(null)
+  const [kingOwner,   setKingOwner]    = useState<number|null>(null)
   const [gs,          setGS]          = useState(getGameState)
   const [isLoaded]                    = useState(true)
   const [kingProInput, setKingProInput] = useState('')
@@ -81,7 +82,8 @@ function AmbassadorContent() {
     fetchWaveInfo(selWave)
       .then(info => {
         if (cancelled) return
-        setCurrentKing(info.king)
+        setCurrentKing(info.viewingKing)
+        setKingOwner(info.king)
         setActiveDisaster(selWave, info.disaster)
       })
       .catch(console.error)
@@ -220,9 +222,13 @@ function AmbassadorContent() {
                         </button>
                       ))}
                     </div>
-                    <GameMap ownership={canSeeFullInfo ? sheetOwnership.ownership : {}} filterDisaster={filterDis} readOnly
+                    <GameMap ownership={canSeeFullInfo ? sheetOwnership.ownership : {}}
+                      disasterOwnership={canSeeFullInfo ? sheetOwnership.disasterOwnership : {}}
+                      eradicatedOwnership={canSeeFullInfo ? sheetOwnership.eradicatedOwnership : {}}
+                      filterDisaster={filterDis} readOnly
                       kingDisaster={canSeeFullInfo ? getActiveDisasterForWave(selWave) : null}
                       currentKing={canSeeFullInfo ? currentKing : null}
+                      kingOwner={canSeeFullInfo ? kingOwner : null}
                       compact />
                     <div className="ambassador-filter-row flex flex-wrap gap-2">
                       {DISASTER_IDS.map(id=>(

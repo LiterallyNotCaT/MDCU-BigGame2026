@@ -8,6 +8,7 @@ export interface OwnershipRow {
   baan: number
   areas: string[]
   disasterAreas: string[]
+  eradicatedAreas: string[]
   count: number
 }
 
@@ -16,44 +17,69 @@ const parseGViz = (text: string): any[] => {
   return js ? JSON.parse(js)?.table?.rows ?? [] : []
 }
 
-async function fetchRows(wave: number) {
-  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&${getWaveSheetQuery(wave)}`
+async function fetchRows(wave: number, range: string) {
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&${getWaveSheetQuery(wave)}&range=${encodeURIComponent(range)}&t=${Date.now()}`
   const text = await (await fetch(url, { cache: 'no-store' })).text()
   return parseGViz(text)
 }
 
-export async function fetchWaveOwnership(wave: number): Promise<{ ownership: Record<string, number>; rows: OwnershipRow[] }> {
-  const sheetRows = await fetchRows(wave)
-  const ownership: Record<string, number> = {}
-  const rows: OwnershipRow[] = []
+const cellValue = (cell: any) => cell?.v ?? cell?.f ?? ''
 
-  sheetRows.slice(19, 31).forEach((row: any) => {
-    const baan = parseInt(String(row?.c?.[9]?.v ?? ''))
+const parseAreaList = (value: unknown) => {
+  const matches = String(value ?? '').toUpperCase().match(/[ABC]\s*[1-9]/g) ?? []
+  return Array.from(new Set(matches.map(area => area.replace(/\s+/g, ''))))
+}
+
+export async function fetchWaveOwnership(wave: number): Promise<{ ownership: Record<string, number>; disasterOwnership: Record<string, number>; eradicatedOwnership: Record<string, number>; rows: OwnershipRow[] }> {
+  const [sheetRows, eradicatedRows] = await Promise.all([
+    fetchRows(wave, 'J20:N31'),
+    wave === 4 ? fetchRows(wave, 'I20:J31') : Promise.resolve([]),
+  ])
+  const ownership: Record<string, number> = {}
+  const disasterOwnership: Record<string, number> = {}
+  const eradicatedOwnership: Record<string, number> = {}
+  const rowsByBaan = new Map<number, OwnershipRow>()
+
+  sheetRows.forEach((row: any) => {
+    const cells = row?.c ?? []
+    const baan = parseInt(String(cellValue(cells?.[0]) ?? ''))
     if (!baan || baan < 1 || baan > 12) return
-    const rawAreas = String(row?.c?.[10]?.v ?? '').trim()
-    const rawDisasterAreas = String(row?.c?.[13]?.v ?? '').trim()
-    const areas = rawAreas && rawAreas !== '-'
-      ? rawAreas.split(',').map(a => a.trim()).filter(Boolean)
-      : []
-    const disasterAreas = rawDisasterAreas && rawDisasterAreas !== '-'
-      ? rawDisasterAreas.split(',').map(a => a.trim()).filter(Boolean)
-      : []
-    const count = parseFloat(String(row?.c?.[11]?.v ?? areas.length)) || areas.length
-    rows.push({ baan, areas, disasterAreas, count })
+    const areas = parseAreaList(cellValue(cells?.[1]))
+    const disasterAreas = parseAreaList(cellValue(cells?.[4]))
+    const count = parseFloat(String(cellValue(cells?.[2]) ?? areas.length)) || areas.length
+    rowsByBaan.set(baan, { baan, areas, disasterAreas, eradicatedAreas: [], count })
     areas.forEach(area => { ownership[area] = baan })
+    disasterAreas.forEach(area => { disasterOwnership[area] = baan })
   })
 
-  return { ownership, rows: rows.sort((a, b) => a.baan - b.baan) }
+  eradicatedRows.forEach((row: any) => {
+    const cells = row?.c ?? []
+    const baan = parseInt(String(cellValue(cells?.[1]) ?? ''))
+    if (!baan || baan < 1 || baan > 12) return
+    const eradicatedAreas = parseAreaList(cellValue(cells?.[0]))
+    if (!eradicatedAreas.length) return
+    const existing = rowsByBaan.get(baan) ?? { baan, areas: [], disasterAreas: [], eradicatedAreas: [], count: 0 }
+    existing.eradicatedAreas = eradicatedAreas
+    rowsByBaan.set(baan, existing)
+    eradicatedAreas.forEach(area => { eradicatedOwnership[area] = baan })
+  })
+
+  const rows = Array.from(rowsByBaan.values())
+  return { ownership, disasterOwnership, eradicatedOwnership, rows: rows.sort((a, b) => a.baan - b.baan) }
 }
 
 export function useWaveOwnership(wave: number) {
   const [ownership, setOwnership] = useState<Record<string, number>>({})
+  const [disasterOwnership, setDisasterOwnership] = useState<Record<string, number>>({})
+  const [eradicatedOwnership, setEradicatedOwnership] = useState<Record<string, number>>({})
   const [rows, setRows] = useState<OwnershipRow[]>([])
 
   const refresh = useCallback(async () => {
     try {
       const data = await fetchWaveOwnership(wave)
       setOwnership(data.ownership)
+      setDisasterOwnership(data.disasterOwnership)
+      setEradicatedOwnership(data.eradicatedOwnership)
       setRows(data.rows)
     } catch (e) {
       console.error(e)
@@ -66,23 +92,23 @@ export function useWaveOwnership(wave: number) {
     return () => window.clearInterval(t)
   }, [refresh])
 
-  return { ownership, rows, refresh }
+  return { ownership, disasterOwnership, eradicatedOwnership, rows, refresh }
 }
 
 export default function OwnershipHistory({ visibleThroughWave = TOTAL_WAVES, className }: { wave?: number; visibleThroughWave?: number; className?: string }) {
-  const [matrix, setMatrix] = useState<Record<number, Record<number, { areas: string[]; disasterAreas: string[] }>>>({})
+  const [matrix, setMatrix] = useState<Record<number, Record<number, { areas: string[]; disasterAreas: string[]; eradicatedAreas: string[] }>>>({})
   const maxVisibleWave = Math.max(1, Math.min(TOTAL_WAVES, visibleThroughWave))
 
   const refreshAll = useCallback(async () => {
     try {
-      const next: Record<number, Record<number, { areas: string[]; disasterAreas: string[] }>> = {}
+      const next: Record<number, Record<number, { areas: string[]; disasterAreas: string[]; eradicatedAreas: string[] }>> = {}
       await Promise.all(Array.from({ length: TOTAL_WAVES }, async (_, i) => {
         const wave = i + 1
         if (wave > maxVisibleWave) return
         const data = await fetchWaveOwnership(wave)
         next[wave] = {}
         data.rows.forEach(row => {
-          next[wave][row.baan] = { areas: row.areas, disasterAreas: row.disasterAreas }
+          next[wave][row.baan] = { areas: row.areas, disasterAreas: row.disasterAreas, eradicatedAreas: row.eradicatedAreas }
         })
       }))
       setMatrix(next)
@@ -124,14 +150,20 @@ export default function OwnershipHistory({ visibleThroughWave = TOTAL_WAVES, cla
                   const cell = matrix[wave]?.[baan]
                   const areas = cell?.areas ?? []
                   const disasterAreas = cell?.disasterAreas ?? []
+                  const eradicatedAreas = cell?.eradicatedAreas ?? []
                   return (
                     <td key={wave} className="min-w-28 px-3 py-2 text-slate-700">
-                      {wave > maxVisibleWave ? '-' : areas.length || disasterAreas.length ? (
+                      {wave > maxVisibleWave ? '-' : areas.length || disasterAreas.length || eradicatedAreas.length ? (
                         <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-1">
                           {areas.length > 0 && <span>{areas.join(', ')}</span>}
                           {disasterAreas.length > 0 && (
                             <span className="ownership-disaster-areas">
                               {disasterAreas.join(', ')}
+                            </span>
+                          )}
+                          {eradicatedAreas.length > 0 && (
+                            <span className="ownership-eradicated-areas">
+                              {eradicatedAreas.join(', ')}
                             </span>
                           )}
                         </span>
