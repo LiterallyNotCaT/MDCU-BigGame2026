@@ -258,7 +258,7 @@ function AdminContent() {
     notify('Reset to Welcome Page')
   }
   const playRulesVideo = () => {
-    const mins = 12.0
+    const mins = 13.0
     setDuration(String(mins))
     applyGS({
       gameMode: 'bid',
@@ -269,7 +269,7 @@ function AdminContent() {
       showResults: false,
       showEventSolution: false,
     })
-    notify('Play Rules Video: 12m')
+    notify('Play Rules Video: 13m')
   }
   const startDisasterSelect = () => {
     const mins = DISASTER_SELECT_MINUTES
@@ -549,7 +549,7 @@ function AdminContent() {
                   </button>
                   <button onClick={playRulesVideo}
                     className={clsx('btn', gs.gamePhase === 'rules' ? 'btn-primary' : 'btn-ghost')}>
-                    Rules Video (4.6m)
+                    Rules Video (13m)
                   </button>
                 </div>
                 <hr className="border-slate-700/40 my-1" />

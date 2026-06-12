@@ -568,7 +568,7 @@ function RulesVideoScreen({ baan, timerEnd }: RulesVideoScreenProps) {
 
     function syncVideoTime(player: any) {
       if (!timerEnd) return
-      const duration = player.getDuration() || 720 // Default fallback to 12m (720s)
+      const duration = (player.getDuration() || 720) + 60 // Video duration + 1m buffer (total 13m = 780s)
       const endMs = new Date(timerEnd).getTime()
       const remainingSeconds = Math.max(0, (endMs - Date.now()) / 1000)
       const expectedTime = Math.max(0, duration - remainingSeconds)
