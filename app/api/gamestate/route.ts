@@ -34,8 +34,20 @@ function normalizeGameState(value: unknown): GameState {
   const state = (value && typeof value === 'object' ? value : {}) as Partial<GameState>
   const currentWave = Number(state.currentWave)
   const duration = Number(state.duration)
-  const gameMode = state.gameMode === 'bet' || state.gameMode === 'event' ? state.gameMode : 'bid'
-  const gamePhase = state.gamePhase === 'select-disaster' ? 'select-disaster' : 'play'
+  const gamePhase =
+    state.gamePhase === 'select-disaster'
+      ? 'select-disaster'
+      : state.gamePhase === 'welcome'
+      ? 'welcome'
+      : state.gamePhase === 'rules'
+      ? 'rules'
+      : 'play'
+  const gameMode =
+    gamePhase === 'welcome' || gamePhase === 'rules'
+      ? 'bid'
+      : state.gameMode === 'bet' || state.gameMode === 'event'
+      ? state.gameMode
+      : 'bid'
 
   return {
     ...defaultState,

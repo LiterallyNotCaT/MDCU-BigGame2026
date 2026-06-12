@@ -9,7 +9,7 @@ import GroupChat from '@/components/GroupChat'
 import { useWaveOwnership } from '@/components/OwnershipHistory'
 import Timer from '@/components/Timer'
 import clsx from 'clsx'
-import { CheckCircle2, Crown, Landmark, LogOut, Sparkles } from 'lucide-react'
+import { CheckCircle2, Crown, Landmark, LogOut, Sparkles, Maximize, Minimize } from 'lucide-react'
 import { HOUSE_NAMES, SHEET_ID, getWaveSheetQuery } from '@/lib/constants'
 import {
   getGameState, saveSubmission, getSubmissionsForBaan,
@@ -398,6 +398,303 @@ function EventGamePanel({ baan, wave, isOpen, showSolution }: { baan: number; wa
         )}
         </div>
       </aside>
+    </div>
+  )
+}
+
+/* ── Welcome & Rules Screens ────────────────────────────────── */
+function WelcomeScreen({ baan }: { baan: number }) {
+  return (
+    <div className="welcome-rules-page text-slate-800 w-full min-w-full">
+      <header className="wire-topbar flex items-center justify-between w-full">
+        <div className="flex items-center gap-8">
+          <HomeButton className="bg-white/10 border-white/20 text-white hover:text-white" />
+          <div className="wire-title text-white">Welcome to BigGame 2026</div>
+          <div className="wire-title text-white flex items-center gap-3">
+            {HOUSE_NAMES[baan]}
+          </div>
+        </div>
+        <button onClick={()=>{sessionStorage.removeItem('baan_login');sessionStorage.removeItem('baan_login_token');window.location.reload()}}
+          className="btn btn-ghost text-white/90 hover:text-red-300 hover:bg-white/10 flex items-center gap-1.5 font-bold">
+          <LogOut size={16} /> Logout
+        </button>
+      </header>
+
+      <main className="welcome-rules-main flex-1 flex items-center justify-center w-full my-auto">
+        <div className="auth-card auth-card-baan text-center w-full relative z-10">
+          <div className="text-5xl mb-4 animate-bounce">🏛️</div>
+          <h2 className="text-3xl font-black text-slate-950 mb-1">{HOUSE_NAMES[baan]}</h2>
+          <p className="font-semibold text-slate-500 mb-6">ยินดีต้อนรับเข้าสู่ระบบเกมลงทุนช่วงบ่าย</p>
+          
+          <div className="inline-flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-cyan-50 border border-cyan-100 shadow-sm mb-4">
+            <span className="relative flex h-3 w-3">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-cyan-500"></span>
+            </span>
+            <span className="font-mono font-bold tracking-wider text-cyan-600 text-sm">WAITING FOR START</span>
+          </div>
+
+          <p className="text-xs font-semibold text-slate-400 mt-2 leading-relaxed">
+            กรุณารอผู้ควบคุมระบบ (Admin) เริ่มต้นวิดีโออธิบายกติกา
+          </p>
+        </div>
+      </main>
+
+      <footer className="w-full text-center text-xs text-slate-400 font-semibold mt-6 mb-4">
+        MDCU Freshy Camp 2026
+      </footer>
+
+      <style>{`
+        .welcome-rules-page {
+          background:
+            radial-gradient(circle at 50% 30%, rgba(255,255,255,0.82), transparent 34rem),
+            linear-gradient(135deg, rgba(219,234,254,0.95), rgba(245,243,255,0.95) 46%, rgba(236,253,245,0.95)),
+            #eef4ff;
+          min-height: 100vh;
+          width: 100% !important;
+          min-width: 100% !important;
+          max-width: 100vw !important;
+          display: flex;
+          flex-direction: column;
+        }
+        .welcome-rules-main {
+          padding: clamp(20px, 4vh, 40px) clamp(16px, 4vw, 36px);
+        }
+      `}</style>
+    </div>
+  )
+}
+
+interface RulesVideoScreenProps {
+  baan: number
+  timerEnd: string | null
+}
+
+function RulesVideoScreen({ baan, timerEnd }: RulesVideoScreenProps) {
+  const playerRef = useRef<any>(null)
+  const [videoState, setVideoState] = useState<'loading' | 'playing' | 'ended'>('loading')
+  const [playerState, setPlayerState] = useState<number>(-1)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement)
+    }
+    document.addEventListener('fullscreenchange', onFullscreenChange)
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange)
+  }, [])
+
+  const handleFullscreen = () => {
+    const el = document.getElementById('video-wrapper')
+    if (el) {
+      if (document.fullscreenElement) {
+        document.exitFullscreen()
+      } else {
+        el.requestFullscreen().catch(err => {
+          console.error('Error entering fullscreen:', err)
+        })
+      }
+    }
+  }
+
+  const handlePlayClick = () => {
+    if (playerRef.current && playerRef.current.playVideo) {
+      playerRef.current.playVideo()
+    }
+  }
+
+  useEffect(() => {
+    // 1. Load the YouTube Iframe API if not already loaded
+    if (!(window as any).YT) {
+      const tag = document.createElement('script')
+      tag.src = 'https://www.youtube.com/iframe_api'
+      const firstScriptTag = document.getElementsByTagName('script')[0]
+      firstScriptTag.parentNode?.insertBefore(tag, firstScriptTag)
+    }
+
+    // 2. Set up the callback for when the API is ready
+    const previousCallback = (window as any).onYouTubeIframeAPIReady
+    ;(window as any).onYouTubeIframeAPIReady = () => {
+      if (previousCallback) previousCallback()
+      initPlayer()
+    }
+
+    // If YT is already loaded, init immediately
+    if ((window as any).YT && (window as any).YT.Player) {
+      initPlayer()
+    }
+
+    function initPlayer() {
+      if (playerRef.current) return
+      playerRef.current = new (window as any).YT.Player('youtube-rules-player', {
+        videoId: 'Nq69KlCbHXo',
+        playerVars: {
+          autoplay: 1,
+          controls: 0,
+          disablekb: 1,
+          fs: 0,
+          modestbranding: 1,
+          rel: 0,
+          showinfo: 0,
+          iv_load_policy: 3,
+        },
+        events: {
+          onReady: (event: any) => {
+            setVideoState('playing')
+            setPlayerState(event.target.getPlayerState())
+            syncVideoTime(event.target)
+          },
+          onStateChange: (event: any) => {
+            setPlayerState(event.data)
+            if (event.data === (window as any).YT.PlayerState.ENDED) {
+              setVideoState('ended')
+            }
+          },
+        },
+      })
+    }
+
+    // Periodically enforce sync and unskippability (every 1 second)
+    const interval = setInterval(() => {
+      if (playerRef.current) {
+        if (playerRef.current.getPlayerState) {
+          setPlayerState(playerRef.current.getPlayerState())
+        }
+        if (playerRef.current.getCurrentTime && videoState === 'playing' && playerRef.current.getPlayerState() === 1) {
+          syncVideoTime(playerRef.current)
+        }
+      }
+    }, 1000)
+
+    function syncVideoTime(player: any) {
+      if (!timerEnd) return
+      const duration = player.getDuration() || 720 // Default fallback to 12m (720s)
+      const endMs = new Date(timerEnd).getTime()
+      const remainingSeconds = Math.max(0, (endMs - Date.now()) / 1000)
+      const expectedTime = Math.max(0, duration - remainingSeconds)
+
+      const currentTime = player.getCurrentTime()
+      if (Math.abs(currentTime - expectedTime) > 2) {
+        player.seekTo(expectedTime, true)
+      }
+    }
+
+    return () => {
+      clearInterval(interval)
+      if (playerRef.current && playerRef.current.destroy) {
+        playerRef.current.destroy()
+        playerRef.current = null
+      }
+    }
+  }, [timerEnd, videoState])
+
+  const showPlayOverlay = videoState === 'playing' && (playerState === -1 || playerState === 2 || playerState === 5)
+
+  return (
+    <div className="welcome-rules-page text-slate-800 w-full min-w-full">
+      <header className="wire-topbar flex items-center justify-between w-full">
+        <div className="flex items-center gap-8">
+          <HomeButton className="bg-white/10 border-white/20 text-white hover:text-white" />
+          <div className="wire-title text-white">คำอธิบายกติกา</div>
+          <div className="wire-title text-white flex items-center gap-3">
+            {HOUSE_NAMES[baan]}
+          </div>
+        </div>
+        <div className="wire-time">
+          <Timer endTime={timerEnd} isOpen={true} compact />
+        </div>
+      </header>
+
+      <main className="flex-1 flex items-center justify-center welcome-rules-main w-full max-w-4xl mx-auto my-auto">
+        <div className="w-full flex flex-col items-center">
+          <div className="text-center mb-6">
+            <h2 className="text-2xl font-black text-slate-950 tracking-tight mb-2">กรุณารับชมกติกาการแข่งขันอย่างตั้งใจ</h2>
+            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-700 text-xs font-bold shadow-sm">
+              <span>📢</span> วิดีโอนี้กำลังเล่นแบบเรียลไทม์และไม่สามารถกดข้ามได้
+            </div>
+          </div>
+
+          <div id="video-wrapper" className="relative w-full aspect-video rounded-2xl overflow-hidden border border-slate-200/80 shadow-2xl bg-black group">
+            <div id="youtube-rules-player" className="w-full h-full" />
+            
+            {/* Invisible click overlay to prevent standard player actions */}
+            <div className="absolute inset-0 z-40 bg-transparent cursor-default pointer-events-auto" />
+
+            {/* Play Button Overlay (shown when paused or cued due to autoplay block) */}
+            {showPlayOverlay && (
+              <div 
+                onClick={handlePlayClick}
+                className="absolute inset-0 z-50 bg-black/60 flex flex-col items-center justify-center cursor-pointer hover:bg-black/70 transition-all text-center px-4"
+              >
+                <div className="w-20 h-20 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white flex items-center justify-center shadow-2xl transition-all transform hover:scale-105 mb-4">
+                  <svg className="w-10 h-10 fill-current ml-1" viewBox="0 0 24 24">
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
+                </div>
+                <p className="font-bold text-lg text-white">คลิกเพื่อเริ่มเล่นวิดีโอกติกา</p>
+                <p className="text-sm text-slate-300 mt-1">Click to play rules video</p>
+              </div>
+            )}
+
+            {/* Fullscreen Button Overlay */}
+            <button 
+              onClick={handleFullscreen}
+              className="absolute bottom-4 right-4 z-50 p-2.5 rounded-lg bg-black/60 hover:bg-black/80 text-white border border-white/15 transition-all cursor-pointer shadow-lg flex items-center justify-center backdrop-blur-sm"
+              title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
+            >
+              {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
+            </button>
+
+            {videoState === 'loading' && (
+              <div className="absolute inset-0 z-40 bg-slate-950 flex flex-col items-center justify-center gap-4">
+                <div className="w-10 h-10 border-4 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+                <p className="font-mono text-sm text-cyan-300">กำลังเชื่อมต่อสตรีมกติกา...</p>
+              </div>
+            )}
+
+            {videoState === 'ended' && (
+              <div className="absolute inset-0 z-40 bg-slate-950/90 flex flex-col items-center justify-center gap-3">
+                <div className="text-5xl animate-pulse">📢</div>
+                <p className="font-bold text-lg text-white">วิดีโอกติกาจบลงแล้ว</p>
+                <p className="text-sm text-slate-400">กรุณารอผู้ดูแลระบบเริ่มต้นเปิดการลงทุน</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </main>
+
+      <footer className="w-full text-center text-xs text-slate-400 font-semibold mt-6 mb-4">
+        MDCU Freshy Camp 2026
+      </footer>
+
+      <style>{`
+        .welcome-rules-page {
+          background:
+            radial-gradient(circle at 50% 30%, rgba(255,255,255,0.82), transparent 34rem),
+            linear-gradient(135deg, rgba(219,234,254,0.95), rgba(245,243,255,0.95) 46%, rgba(236,253,245,0.95)),
+            #eef4ff;
+          min-height: 100vh;
+          width: 100% !important;
+          min-width: 100% !important;
+          max-width: 100vw !important;
+          display: flex;
+          flex-direction: column;
+        }
+        .welcome-rules-main {
+          padding: clamp(20px, 4vh, 40px) clamp(16px, 4vw, 36px);
+        }
+        #video-wrapper:fullscreen {
+          width: 100vw !important;
+          max-width: 100vw !important;
+          height: 100vh !important;
+          border-radius: 0 !important;
+          border: none !important;
+          display: flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+          background: #000 !important;
+        }
+      `}</style>
     </div>
   )
 }
@@ -885,6 +1182,14 @@ function BiddingGame({ baan }: { baan:number }) {
       </div>
     </div>
   )
+
+  if (gs.gamePhase === 'welcome') {
+    return <WelcomeScreen baan={baan} />
+  }
+
+  if (gs.gamePhase === 'rules') {
+    return <RulesVideoScreen baan={baan} timerEnd={gs.timerEnd} />
+  }
 
   return (
     <div className="wire-page-full">

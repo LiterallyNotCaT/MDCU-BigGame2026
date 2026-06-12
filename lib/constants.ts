@@ -97,7 +97,7 @@ export interface GameState {
   timerEnd: string | null  // ISO timestamp
   duration: number      // minutes per wave
   gameMode?: 'bid' | 'bet' | 'event'
-  gamePhase?: 'play' | 'select-disaster'
+  gamePhase?: 'welcome' | 'rules' | 'play' | 'select-disaster'
   showResults?: boolean
   showEventSolution?: boolean
   ambassadorVisibility?: AmbassadorVisibility

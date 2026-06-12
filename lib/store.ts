@@ -52,7 +52,7 @@ export const defaultGameState: GameState = {
   timerEnd: null,
   duration: 10,
   gameMode: 'bid',
-  gamePhase: 'play',
+  gamePhase: 'welcome',
   showResults: false,
   showEventSolution: false,
   ambassadorVisibility: DEFAULT_AMBASSADOR_VISIBILITY,
@@ -124,7 +124,14 @@ export async function fetchGameStateFromSheet(): Promise<GameState | null> {
       timerEnd: values.get('timerEnd') || null,
       duration: Number.isFinite(duration) && duration > 0 ? duration : defaultGameState.duration,
       gameMode: gameModeRaw === 'bet' || gameModeRaw === 'event' ? gameModeRaw : 'bid',
-      gamePhase: gamePhaseRaw === 'select-disaster' ? 'select-disaster' : 'play',
+      gamePhase:
+        gamePhaseRaw === 'select-disaster'
+          ? 'select-disaster'
+          : gamePhaseRaw === 'welcome'
+          ? 'welcome'
+          : gamePhaseRaw === 'rules'
+          ? 'rules'
+          : 'play',
       showResults: values.get('showResults') === 'true',
       showEventSolution: values.get('showEventSolution') === 'true',
       ambassadorVisibility: normalizeAmbassadorVisibility(

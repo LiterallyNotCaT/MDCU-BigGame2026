@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Timer as TimerIcon } from 'lucide-react'
 import clsx from 'clsx'
+import { getGameState, subscribeStore } from '@/lib/store'
 
 interface TimerProps {
   endTime:   string | null
@@ -13,8 +14,17 @@ interface TimerProps {
 export default function Timer({ endTime, isOpen, onExpire, compact }: TimerProps) {
   const [remaining, setRemaining] = useState(0)
   const [expired,   setExpired]   = useState(false)
+  const [phase,     setPhase]     = useState<'welcome' | 'rules' | 'play' | 'select-disaster'>('welcome')
   const totalRef    = useRef(0)
   const expiredRef  = useRef(false)
+
+  useEffect(() => {
+    setPhase(getGameState().gamePhase || 'welcome')
+    const unsub = subscribeStore(() => {
+      setPhase(getGameState().gamePhase || 'welcome')
+    })
+    return unsub
+  }, [])
 
   const tick = useCallback(() => {
     if (!endTime || !isOpen) { setRemaining(0); return }
@@ -53,6 +63,10 @@ export default function Timer({ endTime, isOpen, onExpire, compact }: TimerProps
     :                 'text-cyan-400'
 
   if (compact) {
+    let standbyText = 'STANDBY'
+    if (phase === 'welcome') standbyText = 'WELCOME'
+    else if (phase === 'rules') standbyText = 'RULES END'
+
     return (
       <div 
         className={clsx(
@@ -65,7 +79,7 @@ export default function Timer({ endTime, isOpen, onExpire, compact }: TimerProps
       >
         <span className="timer-status-dot w-2 h-2 rounded-full shrink-0" />
         <span className="timer-text">
-          {!isOpen ? 'STANDBY' : expired ? 'TIME UP' : display}
+          {!isOpen ? standbyText : expired ? 'TIME UP' : (phase === 'rules' ? `RULES ${display}` : display)}
         </span>
       </div>
     )
@@ -83,7 +97,7 @@ export default function Timer({ endTime, isOpen, onExpire, compact }: TimerProps
 
       {/* Time display */}
       <div>
-        <div className="text-label mb-0.5">Timer</div>
+        <div className="text-label mb-0.5">{phase === 'rules' ? 'Rules Video' : 'Timer'}</div>
         <div className={clsx('font-mono text-lg font-bold tracking-wider', colorClass, urgent && 'timer-urgent')}
         style={active ? { textShadow: urgent ? '0 0 14px rgba(239,68,68,0.78)' : '0 0 14px rgba(34,211,238,0.6)' } : undefined}>
           {!isOpen ? '--:--' : expired ? 'END' : display}

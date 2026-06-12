@@ -246,6 +246,31 @@ function AdminContent() {
     notify(`▶ เปิดรับข้อมูล ${mins} นาที`)
   }
   const stopTimer = () => { applyGS({isOpen:false}); notify('⏹ ปิดรับข้อมูลแล้ว') }
+  const setWelcomePhase = () => {
+    applyGS({
+      gameMode: 'bid',
+      gamePhase: 'welcome',
+      isOpen: false,
+      timerEnd: null,
+      showResults: false,
+      showEventSolution: false,
+    })
+    notify('Reset to Welcome Page')
+  }
+  const playRulesVideo = () => {
+    const mins = 12.0
+    setDuration(String(mins))
+    applyGS({
+      gameMode: 'bid',
+      gamePhase: 'rules',
+      isOpen: true,
+      timerEnd: new Date(Date.now() + mins * 60000).toISOString(),
+      duration: mins,
+      showResults: false,
+      showEventSolution: false,
+    })
+    notify('Play Rules Video: 12m')
+  }
   const startDisasterSelect = () => {
     const mins = DISASTER_SELECT_MINUTES
     setDuration(String(mins))
@@ -517,6 +542,17 @@ function AdminContent() {
                 </div>
                 {controlTab === 'games' ? (
                   <>
+                <div className="grid grid-cols-2 gap-2">
+                  <button onClick={setWelcomePhase}
+                    className={clsx('btn', gs.gamePhase === 'welcome' ? 'btn-primary' : 'btn-ghost')}>
+                    Welcome Page
+                  </button>
+                  <button onClick={playRulesVideo}
+                    className={clsx('btn', gs.gamePhase === 'rules' ? 'btn-primary' : 'btn-ghost')}>
+                    Rules Video (4.6m)
+                  </button>
+                </div>
+                <hr className="border-slate-700/40 my-1" />
                 <div className="grid grid-cols-3 gap-2">
                   <button onClick={selectBidMode}
                     className={clsx('btn', gs.gameMode === 'bid' && gs.gamePhase !== 'select-disaster' ? 'btn-primary' : 'btn-ghost')}>
