@@ -33,6 +33,7 @@ type RoundPatch = {
 const FORM_SUBMIT_CLAIM_TTL_SECONDS = 75
 const FORM_SUBMIT_STALE_MS = 75 * 1000
 const FORM_LIVE_TTL_SECONDS = 3 * 60
+const FORM_CONTROL_SNAPSHOT_GRACE_MS = 30 * 1000
 
 function formLiveKey(formKey: string) {
   return `biggame_form_live:${Buffer.from(String(formKey)).toString('base64url')}`
@@ -317,7 +318,20 @@ export async function mergeFormLiveIntoStates(states: Record<string, ScoringForm
   }, {})
 }
 
-export async function publishFullFormState(state: ScoringFormState | null | undefined) {
+function isFreshControlRound(round: FormLiveRound | undefined) {
+  if (!round || round.saving) return false
+  const updatedMs = new Date(round.updatedAt || '').getTime()
+  return Number.isFinite(updatedMs) && Date.now() - updatedMs <= FORM_CONTROL_SNAPSHOT_GRACE_MS
+}
+
+function roundControlDiffersFromLive(round: ScoringFormState['rounds'][number], liveRound: FormLiveRound | undefined) {
+  if (!liveRound) return false
+  return liveRound.confirmed !== (round.confirmed === true)
+    || liveRound.locked !== (round.locked === true)
+    || (liveRound.deadlineAt || '') !== (round.deadlineAt || '')
+}
+
+export async function publishFullFormState(state: ScoringFormState | null | undefined, options?: { authoritative?: boolean }) {
   if (!state?.form?.formKey) return
   const existing = await readFormLiveState(state.form.formKey)
   const releaseClaims: number[] = []
@@ -327,6 +341,13 @@ export async function publishFullFormState(state: ScoringFormState | null | unde
     const staleSaving = isFormLiveRoundSavingStale(liveRound)
 
     if (liveSaving && !staleSaving && round.confirmed !== true) {
+      return []
+    }
+    if (
+      options?.authoritative !== true
+      && isFreshControlRound(liveRound)
+      && roundControlDiffersFromLive(round, liveRound)
+    ) {
       return []
     }
     if (liveSaving) releaseClaims.push(index)

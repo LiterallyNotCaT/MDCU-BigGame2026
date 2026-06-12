@@ -97,6 +97,12 @@ function doPost(e) {
     } else if (payload.action === 'writeMoneyDropSpecialOAuth') {
       const result = handleWriteMoneyDropSpecialOAuth(payload)
       output.setContent(JSON.stringify(result))
+    } else if (payload.action === 'setMoneyDropSpecialControl') {
+      const result = handleSetMoneyDropSpecialControl(payload)
+      output.setContent(JSON.stringify(result))
+    } else if (payload.action === 'setMoneyDropSpecialControlOAuth') {
+      const result = handleSetMoneyDropSpecialControlOAuth(payload)
+      output.setContent(JSON.stringify(result))
     } else if (payload.action === 'setFormRoundControlOAuth') {
       const result = handleSetFormRoundControlOAuth(payload)
       output.setContent(JSON.stringify(result))
@@ -1256,6 +1262,30 @@ function moneyDropSpecialLiveKey_(formKey) {
   return `${formKey}::money-drop-special`
 }
 
+function readMoneyDropSpecialControl_(formKey) {
+  return readFormControl_(moneyDropSpecialLiveKey_(formKey))
+}
+
+function writeMoneyDropSpecialControl_(formKey, control) {
+  writeFormControl_(moneyDropSpecialLiveKey_(formKey), control)
+}
+
+function moneyDropSpecialRoundState_(formKey, index, label, wave, value) {
+  const control = readMoneyDropSpecialControl_(formKey)
+  const roundKey = String(index)
+  const hasControl = Boolean(control.rounds && Object.prototype.hasOwnProperty.call(control.rounds, roundKey))
+  const roundControl = hasControl ? control.rounds[roundKey] || {} : {}
+  return {
+    index,
+    label,
+    wave,
+    value,
+    confirmed: hasControl ? roundControl.confirmed === true : Boolean(String(value || '').trim()),
+    locked: roundControl.locked === true,
+    deadlineAt: String(roundControl.deadlineAt || ''),
+  }
+}
+
 function normalizeMoneyDropSpecialIslandList_(value) {
   const matches = String(value || '').toUpperCase().match(/[ABC]\s*[1-9]/g) || []
   const seen = {}
@@ -1304,8 +1334,8 @@ function handleReadMoneyDropSpecial(payload) {
       formKey: form.formKey,
       liveKey: moneyDropSpecialLiveKey_(form.formKey),
       rounds: [
-        { index: 0, label: 'Wave 2', wave: 2, value: readMoneyDropSpecialCell_(2), confirmed: false, locked: false },
-        { index: 1, label: 'Wave 4', wave: 4, value: readMoneyDropSpecialCell_(4), confirmed: false, locked: false },
+        moneyDropSpecialRoundState_(form.formKey, 0, 'Wave 2', 2, readMoneyDropSpecialCell_(2)),
+        moneyDropSpecialRoundState_(form.formKey, 1, 'Wave 4', 4, readMoneyDropSpecialCell_(4)),
       ],
     },
   }
@@ -1321,6 +1351,16 @@ function writeMoneyDropSpecialForUser_(form, payload, username) {
   try {
     lock = acquireNamedLock_('FORM_WRITE_LOCK', 45000)
     writeMoneyDropSpecialCell_(roundIndex === 0 ? 2 : 4, value)
+    const control = readMoneyDropSpecialControl_(form.formKey)
+    control.rounds = control.rounds || {}
+    control.rounds[String(roundIndex)] = {
+      ...(control.rounds[String(roundIndex)] || {}),
+      confirmed: true,
+      locked: false,
+      confirmedBy: username || 'Unknown',
+      confirmedAt: new Date().toISOString(),
+    }
+    writeMoneyDropSpecialControl_(form.formKey, control)
     return { status: 'ok', message: `${form.user} special input saved`, roundIndex, value, confirmedBy: username || 'Unknown' }
   } catch (err) {
     const message = String(err && err.message ? err.message : err)
@@ -1344,6 +1384,53 @@ function handleWriteMoneyDropSpecialOAuth(payload) {
   const profile = readOAuthProfile_(payload.email)
   if (!oauthCanEditForm_(profile, form)) return { status: 'error', message: 'This form is view-only for your account' }
   return writeMoneyDropSpecialForUser_(form, payload, profile.nickname || profile.email || 'OAuth user')
+}
+
+function handleSetMoneyDropSpecialControl(payload) {
+  const form = findMoneyDropForm_(payload.formKey, false)
+  if (!form) return { status: 'error', message: 'Money Drop form not found' }
+  const password = String(payload.password || '')
+  if (!password || password !== getAdminPassword_()) return { status: 'error', message: 'Wrong admin password' }
+  return updateMoneyDropSpecialControl_(form, payload)
+}
+
+function handleSetMoneyDropSpecialControlOAuth(payload) {
+  const profile = readOAuthProfile_(payload.email)
+  if (!profile.isAdmin) return { status: 'error', message: 'Admin role required' }
+  const form = findMoneyDropForm_(payload.formKey, false)
+  if (!form) return { status: 'error', message: 'Money Drop form not found' }
+  return updateMoneyDropSpecialControl_(form, payload)
+}
+
+function updateMoneyDropSpecialControl_(form, payload) {
+  const roundIndex = Number(payload.roundIndex)
+  if (!Number.isInteger(roundIndex) || roundIndex < 0 || roundIndex > 1) return { status: 'error', message: 'Invalid round' }
+
+  let lock = null
+  try {
+    lock = acquireNamedLock_('FORM_WRITE_LOCK', 20000)
+    const control = readMoneyDropSpecialControl_(form.formKey)
+    control.rounds = control.rounds || {}
+    const round = control.rounds[String(roundIndex)] || {}
+    if (payload.locked !== undefined) round.locked = payload.locked === true
+    if (payload.confirmed !== undefined) round.confirmed = payload.confirmed === true
+    if (payload.deadlineMinutes !== undefined) {
+      const minutes = Math.max(1, Math.min(240, Number(payload.deadlineMinutes) || 10))
+      round.deadlineAt = new Date(Date.now() + minutes * 60000).toISOString()
+    }
+    if (payload.clearDeadline === true) round.deadlineAt = ''
+    control.rounds[String(roundIndex)] = round
+    writeMoneyDropSpecialControl_(form.formKey, control)
+    return {
+      status: 'ok',
+      message: 'Money Drop special control updated',
+      state: handleReadMoneyDropSpecial({ formKey: form.formKey }).state,
+    }
+  } catch (err) {
+    return { status: 'error', message: 'Money Drop special control is busy. Please retry.' }
+  } finally {
+    releaseNamedLock_(lock)
+  }
 }
 
 function handleSetFormRoundControlOAuth(payload) {
