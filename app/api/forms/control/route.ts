@@ -77,7 +77,7 @@ export async function POST(req: Request) {
       if (result.state) {
         const state = normalizeScoringFormState(result.state)
         states[target.formKey] = state
-        await publishFullFormState(state)
+        await publishFullFormState(state, { authoritative: true })
       } else {
         await publishFormRoundPatch(
           target.formKey,

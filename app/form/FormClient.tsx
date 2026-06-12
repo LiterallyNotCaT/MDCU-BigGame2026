@@ -325,6 +325,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
   const stateUiLoadSeq = useRef(0)
   const latestFormStateRequestSeq = useRef<Record<string, number>>({})
   const sheetFreshLoadedForms = useRef<Set<string>>(new Set())
+  const moneyDropSpecialRequestSeq = useRef(0)
   const dirtyRoundsByForm = useRef<Record<string, Set<number>>>({})
   const submittingRoundsByForm = useRef<Record<string, Set<number>>>({})
   const dirtyMoneyDropRoundsByLiveKey = useRef<Record<string, Set<number>>>({})
@@ -421,6 +422,13 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
   const isRoundInRef = (ref: MutableRefObject<Record<string, Set<number>>>, key: string, roundIndex: number) => (
     ref.current[key]?.has(roundIndex) === true
   )
+
+  const invalidateFormStateRequests = useCallback((formKeys: string[]) => {
+    const nextSeq = ++formStateRequestSeq.current
+    formKeys.filter(Boolean).forEach(key => {
+      latestFormStateRequestSeq.current[key] = nextSeq
+    })
+  }, [])
 
   const protectedRoundsForForm = (formKey: string) => {
     const rounds = new Set<number>()
@@ -1163,17 +1171,21 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
 
   const refreshMoneyDropSpecial = useCallback(async (nextFormKey = currentState?.form.formKey) => {
     if (!nextFormKey) return
+    const requestSeq = ++moneyDropSpecialRequestSeq.current
     setMoneyDropSpecialLoading(true)
     try {
       const data = await fetchJson<{ state: MoneyDropSpecialState }>('/api/forms/money-drop-special', {
         method: 'POST',
         body: JSON.stringify({ action: 'read', formKey: nextFormKey }),
       })
+      if (moneyDropSpecialRequestSeq.current !== requestSeq) return
       applyMoneyDropSpecialState(data.state)
     } catch (error) {
-      notify('err', error instanceof Error ? error.message : String(error))
+      if (moneyDropSpecialRequestSeq.current === requestSeq) {
+        notify('err', error instanceof Error ? error.message : String(error))
+      }
     } finally {
-      setMoneyDropSpecialLoading(false)
+      if (moneyDropSpecialRequestSeq.current === requestSeq) setMoneyDropSpecialLoading(false)
     }
   }, [applyMoneyDropSpecialState, currentState?.form.formKey])
 
@@ -1465,6 +1477,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
 
   const setRoundControl = async (roundIndex: number, patch: Record<string, unknown>) => {
     if (!currentState || (!adminSession && !oauthIsAdmin)) return
+    invalidateFormStateRequests([currentState.form.formKey])
     setControlBusy(true)
     try {
       const useOAuthControl = oauthIsAdmin && !adminSession
@@ -1527,6 +1540,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
 
   const setMoneyDropSpecialControl = async (roundIndex: number, patch: Record<string, unknown>) => {
     if (!moneyDropSpecial || (!adminSession && !oauthIsAdmin)) return
+    moneyDropSpecialRequestSeq.current += 1
     setControlBusy(true)
     try {
       const useOAuthControl = oauthIsAdmin && !adminSession
@@ -1600,6 +1614,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     const patch = kind === 'edit'
       ? { confirmed: false, locked: false, clearDeadline: true }
       : { locked: false, clearDeadline: true }
+    invalidateFormStateRequests(targets.map(target => target.formKey))
     setControlBusy(true)
     try {
       const useOAuthControl = oauthIsAdmin && !adminSession
