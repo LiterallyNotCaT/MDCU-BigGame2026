@@ -23,6 +23,7 @@ type MoneyDropSpecialRound = {
   locked: boolean
   saving?: boolean
   error?: string
+  deadlineAt?: string
 }
 
 type MoneyDropSpecialState = {
@@ -61,7 +62,7 @@ async function mergeLive(state: MoneyDropSpecialState) {
     ...state,
     rounds: state.rounds.map(round => ({
       ...round,
-      confirmed: String(round.value || '').trim() ? true : round.confirmed,
+      confirmed: round.confirmed === true,
       saving: false,
       error: '',
     })),
@@ -76,6 +77,7 @@ async function mergeLive(state: MoneyDropSpecialState) {
       locked: round.locked === true,
       saving: false,
       error: '',
+      deadlineAt: round.deadlineAt || '',
       values: [round.value],
     }]
   })
