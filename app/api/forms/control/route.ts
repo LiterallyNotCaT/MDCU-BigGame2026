@@ -67,12 +67,17 @@ export async function POST(req: Request) {
     }
 
     const states: Record<string, ScoringFormState> = {}
-    for (const target of targets) {
-      if (isMoneyDropSpecialLiveKey(target.formKey)) {
-        await persistMoneyDropSpecialControlTarget(payload, admin, target, patch)
-        continue
-      }
+    const normalTargets = targets.filter(target => !isMoneyDropSpecialLiveKey(target.formKey))
+    const specialTargets = targets.filter(target => isMoneyDropSpecialLiveKey(target.formKey))
 
+    if (normalTargets.length > 1) {
+      await persistFormControlTargets(payload, admin, normalTargets)
+      await Promise.all(normalTargets.map(target => publishFormRoundPatch(
+        target.formKey,
+        target.rounds.map(index => ({ index, ...patch })),
+      )))
+    } else if (normalTargets.length === 1) {
+      const target = normalTargets[0]
       const result = await persistFormControlTarget(payload, admin, target)
       if (result.state) {
         const state = normalizeScoringFormState(result.state)
@@ -84,6 +89,10 @@ export async function POST(req: Request) {
           target.rounds.map(index => ({ index, ...patch })),
         )
       }
+    }
+
+    for (const target of specialTargets) {
+      await persistMoneyDropSpecialControlTarget(payload, admin, target, patch)
     }
 
     return NextResponse.json({
@@ -206,6 +215,34 @@ async function persistFormControlTarget(
     roundIndex: target.allRounds ? undefined : target.rounds[0],
     ...gasControlPatchFromPayload(payload),
   })
+}
+
+async function persistFormControlTargets(
+  payload: Record<string, unknown>,
+  admin: AdminContext,
+  targets: ResolvedControlTarget[],
+) {
+  const result = await callGas<{
+    status: string
+    message?: string
+    targets?: Array<{ formKey: string; roundCount: number }>
+    errors?: Array<{ formKey: string; message: string }>
+  }>({
+    action: admin.oauth ? 'setFormRoundControlsOAuth' : 'setFormRoundControls',
+    password: admin.password,
+    email: admin.email,
+    oauth: admin.oauth,
+    allRounds: true,
+    targets: targets.map(target => ({
+      formKey: target.formKey,
+      roundCount: target.rounds.length,
+    })),
+    ...gasControlPatchFromPayload(payload),
+  })
+  if (result.errors?.length) {
+    throw new Error(result.errors.map(error => error.message || error.formKey).join(', '))
+  }
+  return result
 }
 
 async function persistMoneyDropSpecialControlTarget(

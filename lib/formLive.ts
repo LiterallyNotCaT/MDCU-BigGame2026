@@ -33,7 +33,7 @@ type RoundPatch = {
 const FORM_SUBMIT_CLAIM_TTL_SECONDS = 75
 const FORM_SUBMIT_STALE_MS = 75 * 1000
 const FORM_LIVE_TTL_SECONDS = 3 * 60
-const FORM_CONTROL_SNAPSHOT_GRACE_MS = 30 * 1000
+const FORM_CONTROL_SNAPSHOT_GRACE_MS = 2 * 60 * 1000
 
 function formLiveKey(formKey: string) {
   return `biggame_form_live:${Buffer.from(String(formKey)).toString('base64url')}`
@@ -257,7 +257,27 @@ export async function mergeFormLiveIntoState(state: ScoringFormState | null | un
       const liveRound = live.rounds[String(index)]
       if (!liveRound) return round
       const saving = liveRound.saving === true && !isFormLiveRoundSavingStale(liveRound)
-      if (!saving) return round
+      if (!saving) {
+        if (isStateColumnBlank(state, index)) {
+          return {
+            ...round,
+            confirmed: false,
+            locked: false,
+            deadlineAt: '',
+            saving: false,
+            error: '',
+          }
+        }
+        if (!isFreshFormControlRound(liveRound)) return round
+        return {
+          ...round,
+          confirmed: liveRound.confirmed === true,
+          locked: liveRound.locked === true,
+          deadlineAt: liveRound.deadlineAt || '',
+          saving: false,
+          error: liveRound.error || '',
+        }
+      }
       return {
         ...round,
         participants: liveRound.participants || round.participants,
@@ -318,7 +338,7 @@ export async function mergeFormLiveIntoStates(states: Record<string, ScoringForm
   }, {})
 }
 
-function isFreshControlRound(round: FormLiveRound | undefined) {
+export function isFreshFormControlRound(round: FormLiveRound | undefined) {
   if (!round || round.saving) return false
   const updatedMs = new Date(round.updatedAt || '').getTime()
   return Number.isFinite(updatedMs) && Date.now() - updatedMs <= FORM_CONTROL_SNAPSHOT_GRACE_MS
@@ -331,6 +351,10 @@ function roundControlDiffersFromLive(round: ScoringFormState['rounds'][number], 
     || (liveRound.deadlineAt || '') !== (round.deadlineAt || '')
 }
 
+function isStateColumnBlank(state: ScoringFormState, roundIndex: number) {
+  return state.values.every(row => !String(row[roundIndex] ?? '').trim())
+}
+
 export async function publishFullFormState(state: ScoringFormState | null | undefined, options?: { authoritative?: boolean }) {
   if (!state?.form?.formKey) return
   const existing = await readFormLiveState(state.form.formKey)
@@ -339,13 +363,15 @@ export async function publishFullFormState(state: ScoringFormState | null | unde
     const liveRound = existing.rounds[String(index)]
     const liveSaving = liveRound?.saving === true
     const staleSaving = isFormLiveRoundSavingStale(liveRound)
+    const columnBlank = isStateColumnBlank(state, index)
 
     if (liveSaving && !staleSaving && round.confirmed !== true) {
       return []
     }
     if (
-      options?.authoritative !== true
-      && isFreshControlRound(liveRound)
+      !columnBlank
+      && options?.authoritative !== true
+      && isFreshFormControlRound(liveRound)
       && roundControlDiffersFromLive(round, liveRound)
     ) {
       return []
@@ -354,11 +380,11 @@ export async function publishFullFormState(state: ScoringFormState | null | unde
 
     return [{
       index,
-      confirmed: round.confirmed === true,
-      locked: round.locked === true,
+      confirmed: columnBlank ? false : round.confirmed === true,
+      locked: columnBlank ? false : round.locked === true,
       saving: false,
       error: '',
-      deadlineAt: round.deadlineAt || '',
+      deadlineAt: columnBlank ? '' : round.deadlineAt || '',
       participants: '',
       values: [],
     }]

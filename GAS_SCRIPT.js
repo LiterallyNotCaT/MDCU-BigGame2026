@@ -106,6 +106,12 @@ function doPost(e) {
     } else if (payload.action === 'setFormRoundControlOAuth') {
       const result = handleSetFormRoundControlOAuth(payload)
       output.setContent(JSON.stringify(result))
+    } else if (payload.action === 'setFormRoundControls') {
+      const result = handleSetFormRoundControls(payload)
+      output.setContent(JSON.stringify(result))
+    } else if (payload.action === 'setFormRoundControlsOAuth') {
+      const result = handleSetFormRoundControlsOAuth(payload)
+      output.setContent(JSON.stringify(result))
     } else if (payload.action === 'writeChat') {
       const result = handleWriteChat(payload)
       output.setContent(JSON.stringify(result))
@@ -752,14 +758,15 @@ function readFormStateFromSheet_(form, sheet) {
   for (let offset = 0; offset < roundCount; offset++) {
     const col = startColIndex + offset
     const roundControl = control.rounds[String(offset)] || {}
+    const columnBlank = values.every(row => !String(row[offset] || '').trim())
     rounds.push({
       index: offset,
       label: String(rows[2] && rows[2][col] || `Round ${offset + 1}`).trim(),
       wave: String(rows[15] && rows[15][col] || '').trim(),
       participants: defaultParticipants_(String(rows[16] && rows[16][col] || '').trim()),
-      confirmed: roundControl.confirmed === true,
-      locked: roundControl.locked === true,
-      deadlineAt: String(roundControl.deadlineAt || ''),
+      confirmed: columnBlank ? false : roundControl.confirmed === true,
+      locked: columnBlank ? false : roundControl.locked === true,
+      deadlineAt: columnBlank ? '' : String(roundControl.deadlineAt || ''),
     })
   }
 
@@ -1003,6 +1010,73 @@ function updateFormRoundControl_(form, payload) {
       status: 'ok',
       message: allRounds ? 'All form rounds are editable again' : 'Form control updated',
       state: readFormState_(form, true),
+    }
+  } catch (err) {
+    return { status: 'error', message: 'Form control is busy. Please retry.' }
+  } finally {
+    releaseNamedLock_(lock)
+  }
+}
+
+function handleSetFormRoundControls(payload) {
+  const password = String(payload.password || '')
+  if (!password || password !== getAdminPassword_()) return { status: 'error', message: 'Wrong admin password' }
+  return updateFormRoundControls_(payload)
+}
+
+function handleSetFormRoundControlsOAuth(payload) {
+  const profile = readOAuthProfile_(payload.email)
+  if (!profile.isAdmin) return { status: 'error', message: 'Admin role required' }
+  return updateFormRoundControls_(payload)
+}
+
+function updateFormRoundControls_(payload) {
+  const targets = Array.isArray(payload.targets) ? payload.targets : []
+  if (!targets.length) return { status: 'error', message: 'No form targets supplied' }
+
+  let lock = null
+  try {
+    lock = acquireNamedLock_('FORM_WRITE_LOCK', 45000)
+    const updated = []
+    const errors = []
+    const applyPatch = function(round) {
+      if (payload.locked !== undefined) round.locked = payload.locked === true
+      if (payload.confirmed !== undefined) round.confirmed = payload.confirmed === true
+      if (payload.deadlineMinutes !== undefined) {
+        const minutes = Math.max(1, Math.min(240, Number(payload.deadlineMinutes) || 10))
+        round.deadlineAt = new Date(Date.now() + minutes * 60000).toISOString()
+      }
+      if (payload.clearDeadline === true) round.deadlineAt = ''
+      return round
+    }
+
+    targets.forEach(target => {
+      const formKey = String(target && target.formKey || '').trim()
+      const form = findFormConfig_(formKey, false)
+      if (!form) {
+        errors.push({ formKey, message: 'Form not found' })
+        return
+      }
+      const control = readFormControl_(form.formKey)
+      control.rounds = control.rounds || {}
+      let count = Math.max(1, Math.min(24, Math.floor(Number(target.roundCount) || 0)))
+      if (!count) {
+        const state = readFormStateFromSheet_(form, openFormSheet_(form))
+        count = Math.max(state.rounds.length || 0, Number(form.maxRounds) || 0, 1)
+      }
+      for (let index = 0; index < count; index++) {
+        control.rounds[String(index)] = applyPatch(control.rounds[String(index)] || {})
+      }
+      writeFormControl_(form.formKey, control)
+      invalidateFormState_(form)
+      updated.push({ formKey: form.formKey, roundCount: count })
+    })
+
+    return {
+      status: 'ok',
+      message: 'Form controls updated',
+      targets: updated,
+      errors,
     }
   } catch (err) {
     return { status: 'error', message: 'Form control is busy. Please retry.' }
@@ -1275,14 +1349,15 @@ function moneyDropSpecialRoundState_(formKey, index, label, wave, value) {
   const roundKey = String(index)
   const hasControl = Boolean(control.rounds && Object.prototype.hasOwnProperty.call(control.rounds, roundKey))
   const roundControl = hasControl ? control.rounds[roundKey] || {} : {}
+  const blank = !String(value || '').trim()
   return {
     index,
     label,
     wave,
     value,
-    confirmed: hasControl ? roundControl.confirmed === true : Boolean(String(value || '').trim()),
-    locked: roundControl.locked === true,
-    deadlineAt: String(roundControl.deadlineAt || ''),
+    confirmed: blank ? false : hasControl ? roundControl.confirmed === true : true,
+    locked: blank ? false : roundControl.locked === true,
+    deadlineAt: blank ? '' : String(roundControl.deadlineAt || ''),
   }
 }
 

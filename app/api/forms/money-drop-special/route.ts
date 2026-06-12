@@ -2,6 +2,7 @@ import { after, NextResponse } from 'next/server'
 import { auth, isAllowedDocChulaEmail } from '@/auth'
 import {
   claimAndPublishFormRoundSubmit,
+  isFreshFormControlRound,
   isFormLiveRoundSavingStale,
   publishFormRoundPatch,
   publishFormRoundSavedSignal,
@@ -92,7 +93,25 @@ async function mergeLive(state: MoneyDropSpecialState) {
       const liveRound = live.rounds[String(round.index)]
       if (!liveRound) return round
       const saving = liveRound.saving === true && !isFormLiveRoundSavingStale(liveRound)
-      if (!saving) return round
+      if (!saving) {
+        if (!isFreshFormControlRound(liveRound)) return round
+        if (!String(round.value || '').trim()) {
+          return {
+            ...round,
+            confirmed: false,
+            locked: false,
+            saving: false,
+            error: '',
+          }
+        }
+        return {
+          ...round,
+          confirmed: liveRound.confirmed === true,
+          locked: liveRound.locked === true,
+          saving: false,
+          error: liveRound.error || '',
+        }
+      }
       return {
         ...round,
         value: liveRound.values?.[0] ?? round.value,
