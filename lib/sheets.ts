@@ -14,6 +14,11 @@ export { SHEET_ID } from './constants'
 const GAS_URL = process.env.NEXT_PUBLIC_GAS_URL ?? ''
 const CHAT_GID = '398958693'
 const REPORT_CHAT_GID = '1090774629'
+const CLIENT_WAVE_INPUT_CACHE_MS = 2500
+const CLIENT_WAVE_INPUT_RETRY_DELAY_MS = 350
+
+const clientWaveInputsCache = new Map<number, { at: number; data: WaveInputsResult }>()
+const clientWaveInputsInFlight = new Map<number, Promise<WaveInputsResult>>()
 
 // ── Column map (1-indexed, for reference) ──────────────────
 // Wave sheet rows 5–16 = บ้าน 1–12
@@ -93,6 +98,12 @@ async function fetchWaveViewingKing(wave: number): Promise<number | null> {
 function parseHouseNumber(value: unknown) {
   const baan = parseInt(String(value ?? '').trim())
   if (Number.isInteger(baan) && baan >= 1 && baan <= 12) return baan
+  return null
+}
+
+function parseDisasterNumber(value: unknown) {
+  const disaster = parseInt(String(value ?? '').trim())
+  if (Number.isInteger(disaster) && disaster >= 1 && disaster <= 9) return disaster
   return null
 }
 
@@ -195,7 +206,10 @@ export type WaveInputsResult = {
 }
 
 export async function fetchRawWaveInputs(wave: number): Promise<WaveInputsResult> {
-  const rows = await fetchWaveRangeGViz(wave, 'A5:U16')
+  const [rows, infoRows] = await Promise.all([
+    fetchWaveRangeGViz(wave, 'A5:U16'),
+    fetchWaveRangeGViz(wave, 'H20:H22'),
+  ])
   const numberAt = (row: string[], idx: number) => parseFloat(String(row[idx] ?? 0)) || 0
   const textAt = (row: string[], idx: number) => String(row[idx] ?? '').trim()
   const isFilled = (value: string) => value !== '' && value !== '-'
@@ -255,19 +269,34 @@ export async function fetchRawWaveInputs(wave: number): Promise<WaveInputsResult
   const parsed = Array.from(
     parsedRows.reduce((byBaan, row) => byBaan.set(row.baan, row), new Map<number, WaveInputRow>()).values()
   ).sort((a, b) => a.baan - b.baan)
-  const [king, viewingKing, infoCell] = await Promise.all([
-    fetchWaveKingOwner(wave),
-    fetchWaveViewingKing(wave),
-    fetchWaveRangeGViz(wave, 'H22'),
-  ])
-  let kingDisaster: number | null = parseInt(String(infoCell?.[0]?.[0] ?? '').trim())
-  if (isNaN(kingDisaster)) kingDisaster = null
+  const king = kingFromResultRows(rows)
+  const viewingKing = parseHouseNumber(infoRows?.[0]?.[0])
+  const kingDisaster = parseDisasterNumber(infoRows?.[2]?.[0])
   return { rows: parsed, king, viewingKing, kingDisaster }
 }
 
-export async function fetchWaveInputs(wave: number): Promise<WaveInputsResult> {
-  if (typeof window === 'undefined') return fetchRawWaveInputs(wave)
+function cloneWaveInputsResult(data: WaveInputsResult): WaveInputsResult {
+  return {
+    ...data,
+    rows: data.rows.map(row => ({
+      ...row,
+      islands: row.islands.map(island => ({ ...island })),
+      adjustments: row.adjustments.map(adjustment => ({ ...adjustment })),
+      pendingModes: row.pendingModes ? [...row.pendingModes] : undefined,
+    })),
+    pendingWrites: data.pendingWrites?.map(write => ({ ...write, payload: write.payload ? { ...write.payload } : undefined })),
+  }
+}
 
+function wait(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function isTransientFetchFailure(error: unknown) {
+  return error instanceof TypeError
+}
+
+async function fetchWaveInputsFromApi(wave: number): Promise<WaveInputsResult> {
   const res = await fetch(`/api/sheets/wave-inputs?wave=${encodeURIComponent(String(wave))}`, {
     cache: 'no-store',
   })
@@ -276,6 +305,46 @@ export async function fetchWaveInputs(wave: number): Promise<WaveInputsResult> {
     throw new Error((data as { message?: string }).message || 'Failed to fetch wave inputs')
   }
   return data as WaveInputsResult
+}
+
+export async function fetchWaveInputs(wave: number): Promise<WaveInputsResult> {
+  if (typeof window === 'undefined') return fetchRawWaveInputs(wave)
+
+  const cached = clientWaveInputsCache.get(wave)
+  if (cached && Date.now() - cached.at < CLIENT_WAVE_INPUT_CACHE_MS) {
+    return cloneWaveInputsResult(cached.data)
+  }
+
+  const existing = clientWaveInputsInFlight.get(wave)
+  if (existing) return cloneWaveInputsResult(await existing)
+
+  const request = (async () => {
+    try {
+      return await fetchWaveInputsFromApi(wave)
+    } catch (error) {
+      if (isTransientFetchFailure(error)) {
+        await wait(CLIENT_WAVE_INPUT_RETRY_DELAY_MS)
+        try {
+          return await fetchWaveInputsFromApi(wave)
+        } catch (retryError) {
+          const stale = clientWaveInputsCache.get(wave)
+          if (stale && isTransientFetchFailure(retryError)) return stale.data
+          throw retryError
+        }
+      }
+      throw error
+    }
+  })()
+    .then(data => {
+      clientWaveInputsCache.set(wave, { at: Date.now(), data })
+      return data
+    })
+    .finally(() => {
+      clientWaveInputsInFlight.delete(wave)
+    })
+
+  clientWaveInputsInFlight.set(wave, request)
+  return cloneWaveInputsResult(await request)
 }
 
 export interface GroupChatMessage {
@@ -554,12 +623,13 @@ export async function fetchLieHistoryWave(wave: number): Promise<LieHistoryCell[
 // ── READ: King info for a wave ─────────────────────────────
 // KING island owner comes from rows 5-16. Current viewing king comes from H20.
 export async function fetchWaveInfo(wave: number): Promise<{ king: number | null; viewingKing: number | null; disaster: number | null }> {
-  const [king, viewingKing, disasterCell] = await Promise.all([
-    fetchWaveKingOwner(wave),
-    fetchWaveViewingKing(wave),
-    fetchWaveRangeGViz(wave, 'H22'),
+  const [kingRows, infoRows] = await Promise.all([
+    fetchWaveRangeGViz(wave, 'A5:G16'),
+    fetchWaveRangeGViz(wave, 'H20:H22'),
   ])
-  const disaster = parseHouseNumber(disasterCell?.[0]?.[0])
+  const king = kingFromResultRows(kingRows)
+  const viewingKing = parseHouseNumber(infoRows?.[0]?.[0])
+  const disaster = parseDisasterNumber(infoRows?.[2]?.[0])
   return { king, viewingKing, disaster }
 }
 
@@ -584,10 +654,6 @@ export interface WritePayload {
 
 // ── WRITE: Send submission to sheet via GAS ────────────────
 const SHEET_WRITE_RETRY_DELAYS_MS = [0, 600, 1400, 2600]
-
-function wait(ms: number) {
-  return new Promise(resolve => setTimeout(resolve, ms))
-}
 
 function shouldRetrySheetWrite(status: number, message: string) {
   return status === 429 || status >= 500 || /busy|retry|lock|timeout|timed out|temporarily/i.test(message)

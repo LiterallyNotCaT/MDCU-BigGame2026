@@ -53,6 +53,8 @@ export const RANK_REWARDS: Record<number, number> = {
 
 export const TOTAL_WAVES = 5
 export const HOUSES = Array.from({ length: 12 }, (_, i) => i + 1)
+export type MapMode = 'simple' | 'image' | 'both'
+export const DEFAULT_MAP_MODE: MapMode = 'simple'
 
 // Types
 export interface BiddingEntry {
@@ -100,6 +102,7 @@ export interface GameState {
   gamePhase?: 'welcome' | 'rules' | 'play' | 'select-disaster'
   showResults?: boolean
   showEventSolution?: boolean
+  mapMode?: MapMode
   ambassadorVisibility?: AmbassadorVisibility
   chatPermissions?: ChatPermissions
   updatedAt?: string
@@ -157,6 +160,10 @@ export function normalizeChatPermissions(value?: Partial<ChatPermissions> | null
     adminPrivate: true,
     playerPrivate: value?.playerPrivate === undefined ? DEFAULT_CHAT_PERMISSIONS.playerPrivate : value.playerPrivate === true,
   }
+}
+
+export function normalizeMapMode(value?: string | null): MapMode {
+  return value === 'image' || value === 'both' ? value : DEFAULT_MAP_MODE
 }
 
 export interface LeaderboardEntry {

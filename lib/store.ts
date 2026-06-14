@@ -8,8 +8,10 @@ import {
   WaveSubmission,
   DEFAULT_AMBASSADOR_VISIBILITY,
   DEFAULT_CHAT_PERMISSIONS,
+  DEFAULT_MAP_MODE,
   normalizeAmbassadorVisibility,
   normalizeChatPermissions,
+  normalizeMapMode,
 } from './constants'
 
 const KEY_GAME_STATE    = 'biggame_state'
@@ -55,6 +57,7 @@ export const defaultGameState: GameState = {
   gamePhase: 'welcome',
   showResults: false,
   showEventSolution: false,
+  mapMode: DEFAULT_MAP_MODE,
   ambassadorVisibility: DEFAULT_AMBASSADOR_VISIBILITY,
   chatPermissions: DEFAULT_CHAT_PERMISSIONS,
 }
@@ -64,6 +67,7 @@ export function getGameState(): GameState {
   return {
     ...defaultGameState,
     ...state,
+    mapMode: normalizeMapMode(state.mapMode),
     ambassadorVisibility: normalizeAmbassadorVisibility(state.ambassadorVisibility),
     chatPermissions: normalizeChatPermissions(state.chatPermissions),
   }
@@ -134,6 +138,7 @@ export async function fetchGameStateFromSheet(): Promise<GameState | null> {
           : 'play',
       showResults: values.get('showResults') === 'true',
       showEventSolution: values.get('showEventSolution') === 'true',
+      mapMode: normalizeMapMode(values.get('mapMode')),
       ambassadorVisibility: normalizeAmbassadorVisibility(
         values.get('ambassadorVisibility') ? JSON.parse(values.get('ambassadorVisibility') || '{}') : undefined,
       ),
@@ -168,7 +173,14 @@ export async function fetchGameStateFromCloud(): Promise<GameState | null> {
   try {
     const res = await fetch(`${CLOUD_GAME_STATE_URL}?t=${Date.now()}`, { cache: 'no-store' })
     if (!res.ok) return null
-    return { ...defaultGameState, ...(await res.json() as Partial<GameState>) }
+    const state = await res.json() as Partial<GameState>
+    return {
+      ...defaultGameState,
+      ...state,
+      mapMode: normalizeMapMode(state.mapMode),
+      ambassadorVisibility: normalizeAmbassadorVisibility(state.ambassadorVisibility),
+      chatPermissions: normalizeChatPermissions(state.chatPermissions),
+    }
   } catch {
     return null
   }

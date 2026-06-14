@@ -17,6 +17,12 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
 
+const CHAT_SHEET_CACHE_MS = 4000
+const chatMessagesCache = new Map<ChatMode, { at: number; messages: GroupChatMessage[] }>()
+const chatMessagesInFlight = new Map<ChatMode, Promise<GroupChatMessage[]>>()
+const chatLatestCache = new Map<ChatMode, { at: number; latestId: string }>()
+const chatLatestInFlight = new Map<ChatMode, Promise<string>>()
+
 function normalizeMode(value: unknown): ChatMode {
   return String(value || '').trim().toLowerCase() === 'report' ? 'report' : 'bid'
 }
@@ -62,10 +68,71 @@ function chatFingerprint(message: GroupChatMessage) {
   ].join('\u001f')
 }
 
+function cloneChatMessage(message: GroupChatMessage): GroupChatMessage {
+  return { ...message }
+}
+
+async function fetchSheetChatMessagesCached(mode: ChatMode) {
+  const cached = chatMessagesCache.get(mode)
+  if (cached && Date.now() - cached.at < CHAT_SHEET_CACHE_MS) {
+    return cached.messages.map(cloneChatMessage)
+  }
+
+  const existing = chatMessagesInFlight.get(mode)
+  if (existing) return (await existing).map(cloneChatMessage)
+
+  const request = fetchGroupChatMessages(mode)
+    .then(messages => {
+      chatMessagesCache.set(mode, { at: Date.now(), messages })
+      chatLatestCache.set(mode, { at: Date.now(), latestId: messages[messages.length - 1]?.chatId || '' })
+      return messages
+    })
+    .finally(() => {
+      chatMessagesInFlight.delete(mode)
+    })
+
+  chatMessagesInFlight.set(mode, request)
+  return (await request).map(cloneChatMessage)
+}
+
+async function fetchSheetChatLatestIdCached(mode: ChatMode) {
+  const messagesCache = chatMessagesCache.get(mode)
+  if (messagesCache && Date.now() - messagesCache.at < CHAT_SHEET_CACHE_MS) {
+    return messagesCache.messages[messagesCache.messages.length - 1]?.chatId || ''
+  }
+
+  const cached = chatLatestCache.get(mode)
+  if (cached && Date.now() - cached.at < CHAT_SHEET_CACHE_MS) return cached.latestId
+
+  const existing = chatLatestInFlight.get(mode)
+  if (existing) return existing
+
+  const request = fetchGroupChatLatestId(mode)
+    .then(latestId => {
+      chatLatestCache.set(mode, { at: Date.now(), latestId })
+      return latestId
+    })
+    .finally(() => {
+      chatLatestInFlight.delete(mode)
+    })
+
+  chatLatestInFlight.set(mode, request)
+  return request
+}
+
+async function readChatLiveMessagesSoft(mode: ChatMode) {
+  try {
+    return await readChatLiveMessages(mode)
+  } catch (error) {
+    console.warn('Chat live Redis read failed:', error)
+    return []
+  }
+}
+
 async function messagesWithLive(mode: ChatMode) {
   const [sheetMessages, liveMessages] = await Promise.all([
-    fetchGroupChatMessages(mode),
-    readChatLiveMessages(mode),
+    fetchSheetChatMessagesCached(mode),
+    readChatLiveMessagesSoft(mode),
   ])
   const sheetFingerprints = new Set(sheetMessages.map(chatFingerprint))
   const pendingMessages: GroupChatMessage[] = []
@@ -89,8 +156,8 @@ export async function GET(req: Request) {
   try {
     if (latestOnly) {
       const [latestSheetId, liveMessages] = await Promise.all([
-        fetchGroupChatLatestId(mode),
-        readChatLiveMessages(mode),
+        fetchSheetChatLatestIdCached(mode),
+        readChatLiveMessagesSoft(mode),
       ])
       const latestLiveId = liveMessages[liveMessages.length - 1]?.chatId || ''
       return NextResponse.json({

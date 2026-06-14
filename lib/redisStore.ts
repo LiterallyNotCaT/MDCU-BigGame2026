@@ -41,6 +41,7 @@ async function redisUrlCommand(args: string[]) {
   const socket: Socket | TLSSocket = url.protocol === 'rediss:'
     ? connect({ host: url.hostname, port, servername: url.hostname })
     : createConnection({ host: url.hostname, port })
+  const readyEvent = url.protocol === 'rediss:' ? 'secureConnect' : 'connect'
 
   const responsesNeeded = url.password ? 2 : 1
   const commands = [
@@ -51,7 +52,11 @@ async function redisUrlCommand(args: string[]) {
   return await new Promise<unknown>((resolve, reject) => {
     let pending = Buffer.alloc(0)
     const values: unknown[] = []
+    let settled = false
     const done = (err?: Error, value?: unknown) => {
+      if (settled) return
+      settled = true
+      socket.setTimeout(0)
       socket.destroy()
       if (err) reject(err)
       else resolve(value)
@@ -59,7 +64,7 @@ async function redisUrlCommand(args: string[]) {
 
     socket.setTimeout(8000, () => done(new Error('Redis command timed out')))
     socket.once('error', done)
-    socket.once('connect', () => {
+    socket.once(readyEvent, () => {
       socket.write(commands.map(encodeCommand).join(''))
     })
     socket.on('data', chunk => {

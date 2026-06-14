@@ -162,18 +162,34 @@ function optimisticChatTime() {
   }
 }
 
+function chatWait(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function isTransientFetchFailure(error: unknown) {
+  return error instanceof TypeError
+}
+
 async function fetchChatJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
-    ...init,
-    cache: 'no-store',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
-  })
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok || data?.ok === false) throw new Error(data?.message || `Chat request failed: ${res.status}`)
-  return data as T
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(url, {
+        ...init,
+        cache: 'no-store',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(init?.headers ?? {}),
+        },
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || data?.ok === false) throw new Error(data?.message || `Chat request failed: ${res.status}`)
+      return data as T
+    } catch (error) {
+      if (!isTransientFetchFailure(error) || attempt > 0) throw error
+      await chatWait(300)
+    }
+  }
+  throw new Error('Chat request failed')
 }
 
 async function fetchGroupChatMessages(mode: 'bid' | 'report' = 'bid') {
@@ -236,6 +252,8 @@ export default function GroupChat({
   const initializedRef = useRef(false)
   const listRef = useRef<HTMLDivElement | null>(null)
   const initialScrollDoneRef = useRef(false)
+  const refreshInFlightRef = useRef(false)
+  const latestInFlightRef = useRef(false)
   const chatTitle = label ?? (mode === 'report' ? 'Report' : 'Chat')
   const reportStaffOptions = useMemo(() => {
     const seen = new Set<string>()
@@ -342,6 +360,8 @@ export default function GroupChat({
   }, [channelFilter, channelOptions])
 
   const refresh = useCallback(async () => {
+    if (refreshInFlightRef.current) return
+    refreshInFlightRef.current = true
     try {
       const next = await fetchGroupChatMessages(mode)
       const viewableNext = next.filter(message => mode === 'report'
@@ -380,12 +400,18 @@ export default function GroupChat({
         setUnread(false)
       }
     } catch (e) {
-      console.error(e)
-      setError('Cannot load chat')
+      if (!isTransientFetchFailure(e)) {
+        console.warn('Cannot load chat:', e)
+        setError('Cannot load chat')
+      }
+    } finally {
+      refreshInFlightRef.current = false
     }
   }, [actor, channelFilter, chatPermissions, mode, open])
 
   const checkLatest = useCallback(async () => {
+    if (latestInFlightRef.current) return
+    latestInFlightRef.current = true
     try {
       const latestId = await fetchGroupChatLatestId(mode)
       if (!latestId) return
@@ -397,7 +423,9 @@ export default function GroupChat({
         await refresh()
       }
     } catch (e) {
-      console.error(e)
+      if (!isTransientFetchFailure(e)) console.warn('Cannot check latest chat:', e)
+    } finally {
+      latestInFlightRef.current = false
     }
   }, [mode, refresh])
 
@@ -409,7 +437,7 @@ export default function GroupChat({
     const intervalId = window.setInterval(() => {
       if (open) void refresh()
       else void checkLatest()
-    }, open ? 1800 : 6000)
+    }, open ? 3000 : 8000)
     return () => window.clearInterval(intervalId)
   }, [checkLatest, open, refresh])
 

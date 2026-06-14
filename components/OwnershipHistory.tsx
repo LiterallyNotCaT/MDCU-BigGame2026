@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import clsx from 'clsx'
-import { HOUSE_COLORS, HOUSE_NAMES, SHEET_ID, TOTAL_WAVES, getWaveSheetQuery } from '@/lib/constants'
+import { HOUSE_COLORS, HOUSE_NAMES, HOUSE_TEXT_COLORS, SHEET_ID, TOTAL_WAVES, getWaveSheetQuery } from '@/lib/constants'
 
 export interface OwnershipRow {
   baan: number
@@ -142,8 +142,13 @@ export default function OwnershipHistory({ visibleThroughWave = TOTAL_WAVES, cla
           <tbody>
             {Array.from({ length: 12 }, (_, i) => i + 1).map(baan => (
               <tr key={baan} className="border-b border-slate-100">
-                <td className="whitespace-nowrap px-3 py-2 font-semibold" style={{ color: HOUSE_COLORS[baan] }}>
-                  {HOUSE_NAMES[baan]}
+                <td className="whitespace-nowrap px-3 py-2 font-semibold">
+                  <span
+                    className="inline-flex min-w-[4.75rem] items-center justify-center rounded-md border px-2 py-1 text-xs font-black"
+                    style={{ background: HOUSE_COLORS[baan], color: HOUSE_TEXT_COLORS[baan], borderColor: 'rgba(15, 23, 42, 0.28)' }}
+                  >
+                    {HOUSE_NAMES[baan]}
+                  </span>
                 </td>
                 {Array.from({ length: TOTAL_WAVES }, (_, i) => {
                   const wave = i + 1

@@ -4,7 +4,7 @@ import AuthGuard from '@/components/AuthGuard'
 import HomeButton from '@/components/HomeButton'
 import FinanceHistory from '@/components/FinanceHistory'
 import FullscreenButton from '@/components/FullscreenButton'
-import GameMap from '@/components/GameMap'
+import GameMap from '@/components/GameMapView'
 import LieHistory from '@/components/LieHistory'
 import OwnershipHistory, { useWaveOwnership } from '@/components/OwnershipHistory'
 import SharedScoreboard from '@/components/SharedScoreboard'
@@ -229,6 +229,7 @@ function AmbassadorContent() {
                       kingDisaster={canSeeFullInfo ? getActiveDisasterForWave(selWave) : null}
                       currentKing={canSeeFullInfo ? currentKing : null}
                       kingOwner={canSeeFullInfo ? kingOwner : null}
+                      mode={gs.mapMode}
                       compact />
                     <div className="ambassador-filter-row flex flex-wrap gap-2">
                       {DISASTER_IDS.map(id=>(

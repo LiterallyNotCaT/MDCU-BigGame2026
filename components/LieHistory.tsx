@@ -2,7 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useState } from 'react'
 import clsx from 'clsx'
-import { HOUSE_COLORS, HOUSE_NAMES } from '@/lib/constants'
+import { HOUSE_COLORS, HOUSE_NAMES, HOUSE_TEXT_COLORS } from '@/lib/constants'
 import { fetchLieHistoryWave, type LieHistoryCell } from '@/lib/sheets'
 
 const LIE_WAVES = [1, 2, 3, 4]
@@ -86,8 +86,13 @@ export default function LieHistory({ className }: { className?: string }) {
           <tbody>
             {Array.from({ length: 12 }, (_, i) => i + 1).map(baan => (
               <tr key={baan} className="border-b border-slate-100">
-                <td className="whitespace-nowrap px-1.5 py-2 font-semibold sm:px-2" style={{ color: HOUSE_COLORS[baan] }}>
-                  {HOUSE_NAMES[baan]}
+                <td className="whitespace-nowrap px-1.5 py-2 font-semibold sm:px-2">
+                  <span
+                    className="inline-flex min-w-[4.75rem] items-center justify-center rounded-md border px-2 py-1 text-xs font-black"
+                    style={{ background: HOUSE_COLORS[baan], color: HOUSE_TEXT_COLORS[baan], borderColor: 'rgba(15, 23, 42, 0.28)' }}
+                  >
+                    {HOUSE_NAMES[baan]}
+                  </span>
                 </td>
                 {LIE_WAVES.map(wave => {
                   const cell = matrix[wave]?.[baan]

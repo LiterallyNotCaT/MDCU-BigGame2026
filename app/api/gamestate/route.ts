@@ -6,8 +6,10 @@ import { callGas } from '@/lib/gas'
 import {
   DEFAULT_AMBASSADOR_VISIBILITY,
   DEFAULT_CHAT_PERMISSIONS,
+  DEFAULT_MAP_MODE,
   normalizeAmbassadorVisibility,
   normalizeChatPermissions,
+  normalizeMapMode,
   type GameState,
 } from '@/lib/constants'
 
@@ -27,6 +29,7 @@ const defaultState: GameState = {
   gamePhase: 'play',
   showResults: false,
   showEventSolution: false,
+  mapMode: DEFAULT_MAP_MODE,
   ambassadorVisibility: DEFAULT_AMBASSADOR_VISIBILITY,
   chatPermissions: DEFAULT_CHAT_PERMISSIONS,
 }
@@ -61,6 +64,7 @@ function normalizeGameState(value: unknown): GameState {
     gamePhase: gameMode === 'bid' ? gamePhase : 'play',
     showResults: state.showResults === true,
     showEventSolution: state.showEventSolution === true,
+    mapMode: normalizeMapMode(state.mapMode),
     ambassadorVisibility: normalizeAmbassadorVisibility(state.ambassadorVisibility),
     chatPermissions: normalizeChatPermissions(state.chatPermissions),
     updatedAt: typeof state.updatedAt === 'string' ? state.updatedAt : undefined,

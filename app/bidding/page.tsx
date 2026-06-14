@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import HomeButton from '@/components/HomeButton'
-import GameMap from '@/components/GameMap'
+import GameMap from '@/components/GameMapView'
 import BiddingCart from '@/components/BiddingCart'
 import FinanceHistory from '@/components/FinanceHistory'
 import FullscreenButton from '@/components/FullscreenButton'
@@ -197,6 +197,10 @@ type BiddingDraft = {
 }
 
 const BIDDING_DRAFT_TTL_MS = 10 * 60 * 1000
+
+function isTransientFetchFailure(error: unknown) {
+  return error instanceof TypeError
+}
 
 function readBiddingDraft(key: string): BiddingDraft | null {
   if (typeof window === 'undefined') return null
@@ -755,6 +759,7 @@ function BiddingGame({ baan }: { baan:number }) {
   const previousResultState = useRef<{ wave: number; showResults: boolean } | null>(null)
   const previousOpenState = useRef(getGameState().isOpen)
   const highlightTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const sheetSnapshotInFlight = useRef(false)
   const totalBet = useMemo(() => cart.reduce((s,i)=>s+i.amount,0), [cart])
   const islandCart = useMemo(() => cart.filter(i => i.area !== 'KING'), [cart])
   const kingBid = useMemo(() => cart.find(i => i.area === 'KING'), [cart])
@@ -999,6 +1004,8 @@ function BiddingGame({ baan }: { baan:number }) {
   }, [baan, currentSubmission, draftKey, gs.currentWave, isBetMode, isSaved, isSyncing])
 
   const fetchSheetSnapshot = useCallback(async () => {
+    if (sheetSnapshotInFlight.current) return
+    sheetSnapshotInFlight.current = true
     try {
       const wave = getGameState().currentWave
       const data = await fetchWaveInputs(wave)
@@ -1006,7 +1013,9 @@ function BiddingGame({ baan }: { baan:number }) {
       const row = data.rows.find(item => item.baan === baan) ?? null
       applySheetInput(row, { king: data.king, viewingKing: data.viewingKing, kingDisaster: data.kingDisaster })
     } catch (e) {
-      console.error(e)
+      if (!isTransientFetchFailure(e)) console.warn('Wave input refresh failed:', e)
+    } finally {
+      sheetSnapshotInFlight.current = false
     }
   }, [applySheetInput, baan])
 
@@ -1478,6 +1487,7 @@ function BiddingGame({ baan }: { baan:number }) {
                       kingDisasterTone={isSelectDisasterPhase && canChooseKingDisaster ? 'selection' : 'result'}
                       currentKing={mapCurrentKing}
                       kingOwner={mapKingOwner}
+                      mode={gs.mapMode}
                       compact />
                     </>
                   )}

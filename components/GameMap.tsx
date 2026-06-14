@@ -3,7 +3,7 @@ import { memo } from 'react'
 import clsx from 'clsx'
 import { HOUSE_COLORS, HOUSE_TEXT_COLORS, DISASTER_AREAS } from '@/lib/constants'
 
-interface MapProps {
+export interface MapProps {
   ownership:       Record<string, number>
   disasterOwnership?: Record<string, number>
   eradicatedOwnership?: Record<string, number>
@@ -25,7 +25,7 @@ const GROUPS = [
   { id:'D', areas:['KING'],                                 income:'King', dis:'choose D' },
 ]
 
-function getAreaDisasters(area: string): number[] {
+export function getAreaDisasters(area: string): number[] {
   if (area === 'KING') return []
   const out: number[] = []
   for (const [num, data] of Object.entries(DISASTER_AREAS)) {
@@ -37,7 +37,7 @@ function getAreaDisasters(area: string): number[] {
   return out
 }
 
-function getAffected(dn: number | null): Set<string> {
+export function getAffected(dn: number | null): Set<string> {
   if (!dn || !DISASTER_AREAS[dn]) return new Set()
   const s = new Set<string>()
   const d = DISASTER_AREAS[dn]

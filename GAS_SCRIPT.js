@@ -1787,6 +1787,7 @@ function handleWriteGameState(state) {
   const wave = Number(state.currentWave)
   const duration = Number(state.duration || 10)
   const gameMode = state.gameMode === 'bet' || state.gameMode === 'event' ? state.gameMode : 'bid'
+  const mapMode = state.mapMode === 'image' || state.mapMode === 'both' ? state.mapMode : 'simple'
   if (!wave || wave < 1 || wave > 5) return { status: 'error', message: 'Invalid currentWave' }
 
   const ss = SpreadsheetApp.openById(SHEET_ID)
@@ -1805,6 +1806,7 @@ function handleWriteGameState(state) {
     ['gamePhase', state.gamePhase === 'select-disaster' ? 'select-disaster' : 'play'],
     ['showResults', state.showResults === true ? 'true' : 'false'],
     ['showEventSolution', state.showEventSolution === true ? 'true' : 'false'],
+    ['mapMode', mapMode],
     ['ambassadorVisibility', JSON.stringify(state.ambassadorVisibility || {})],
     ['chatPermissions', JSON.stringify(state.chatPermissions || {})],
     ['updatedAt', state.updatedAt || new Date().toISOString()],

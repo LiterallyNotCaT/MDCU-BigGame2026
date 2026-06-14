@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import AuthGuard from '@/components/AuthGuard'
 import HomeButton from '@/components/HomeButton'
-import GameMap from '@/components/GameMap'
+import GameMap from '@/components/GameMapView'
 import FinanceHistory from '@/components/FinanceHistory'
 import FullscreenButton from '@/components/FullscreenButton'
 import GroupChat from '@/components/GroupChat'
@@ -17,9 +17,9 @@ import {
   LayoutDashboard, CheckCircle2, Clock, RotateCcw,
 } from 'lucide-react'
 import {
-  HOUSE_COLORS, HOUSE_NAMES, TOTAL_WAVES,
+  HOUSE_COLORS, HOUSE_NAMES, HOUSE_TEXT_COLORS, TOTAL_WAVES,
   normalizeAmbassadorVisibility, type AmbassadorTabKey,
-  normalizeChatPermissions, type ChatPermissions,
+  normalizeChatPermissions, normalizeMapMode, type ChatPermissions, type MapMode,
 } from '@/lib/constants'
 import { AFTERNOON_SCORE_CSV_URL } from '@/lib/scoreboardSources'
 import { fetchWaveInputs, type WaveInputRow, type WaveInputsResult } from '@/lib/sheets'
@@ -44,6 +44,15 @@ const CHAT_PERMISSION_CONTROLS: Array<{ key: keyof ChatPermissions; label: strin
   { key: 'groupChat', label: 'Group chat' },
   { key: 'playerPrivate', label: 'Player private' },
 ]
+const MAP_MODE_CONTROLS: Array<{ value: MapMode; label: string }> = [
+  { value: 'simple', label: 'simple' },
+  { value: 'image', label: 'image' },
+  { value: 'both', label: 'both modes' },
+]
+
+function isTransientFetchFailure(error: unknown) {
+  return error instanceof TypeError
+}
 
 function submissionKey(wave: number, baan: number) {
   return `${wave}:${baan}`
@@ -94,21 +103,23 @@ function AdminContent() {
 
   // ── Fetch all sheet scores ──────────────────────────────
   const fetchAll = useCallback(async () => {
-    try {
-      const inputs: Record<number, WaveInputRow[]> = {}
-      const pendingWrites: Record<number, NonNullable<WaveInputsResult['pendingWrites']>> = {}
-      const meta: Record<number, WaveMeta> = {}
-      for (let w=1; w<=TOTAL_WAVES; w++) {
+    const inputs: Record<number, WaveInputRow[]> = {}
+    const pendingWrites: Record<number, NonNullable<WaveInputsResult['pendingWrites']>> = {}
+    const meta: Record<number, WaveMeta> = {}
+    for (let w=1; w<=TOTAL_WAVES; w++) {
+      try {
         const data = await fetchWaveInputs(w)
         inputs[w] = data.rows
         pendingWrites[w] = data.pendingWrites ?? []
         meta[w] = { king: data.king, viewingKing: data.viewingKing, disaster: data.kingDisaster }
         setActiveDisaster(w, data.kingDisaster)
+      } catch (e) {
+        if (!isTransientFetchFailure(e)) console.warn(`Wave ${w} input refresh failed:`, e)
       }
-      setSheetInputs(inputs)
-      setPendingWritesByWave(pendingWrites)
-      setWaveMeta(meta)
-    } catch(e){ console.error(e) }
+    }
+    if (Object.keys(inputs).length) setSheetInputs(prev => ({ ...prev, ...inputs }))
+    if (Object.keys(pendingWrites).length) setPendingWritesByWave(prev => ({ ...prev, ...pendingWrites }))
+    if (Object.keys(meta).length) setWaveMeta(prev => ({ ...prev, ...meta }))
   }, [])
 
   useEffect(()=>{
@@ -470,8 +481,8 @@ function AdminContent() {
                         return (
                           <div key={b} className={clsx('admin-submission-card flex min-h-14 items-center gap-3 rounded-lg border px-3 py-2.5',
                             rowFailed ? 'border-red-300 bg-red-50' : saving ? 'border-blue-300 bg-blue-50' : done ? 'border-green-300 bg-green-50' : 'border-amber-200 bg-amber-50')}>
-                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg font-mono font-black text-white"
-                              style={{background:HOUSE_COLORS[b]}}>
+                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg font-mono font-black"
+                              style={{background:HOUSE_COLORS[b], color:HOUSE_TEXT_COLORS[b]}}>
                               {b}
                             </span>
                             <div className="min-w-0 flex-1">
@@ -517,6 +528,7 @@ function AdminContent() {
                       kingDisaster={getActiveDisasterForWave(mapWave)}
                       currentKing={waveMeta[mapWave]?.viewingKing ?? null}
                       kingOwner={waveMeta[mapWave]?.king ?? null}
+                      mode={gs.mapMode}
                       readOnly compact />
                   </div>
                 )}
@@ -659,6 +671,22 @@ function AdminContent() {
                   </>
                 ) : (
                   <>
+                <div className="wire-panel admin-map-mode-card bg-white p-3">
+                  <div className="mb-2">
+                    <div className="font-display text-sm font-bold text-slate-800">Map mode</div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {MAP_MODE_CONTROLS.map(item => (
+                      <button
+                        key={item.value}
+                        onClick={() => applyGS({ mapMode: item.value })}
+                        className={clsx('btn min-h-10 px-2 text-xs', normalizeMapMode(gs.mapMode) === item.value ? 'btn-success' : 'btn-ghost')}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <div className="wire-panel admin-ambassador-visibility-card bg-white p-3">
                   <div className="mb-2">
                     <div className="font-display text-sm font-bold text-slate-800">Ambassador visibility</div>
