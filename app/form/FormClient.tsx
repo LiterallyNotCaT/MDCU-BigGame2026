@@ -91,6 +91,15 @@ function hasFreshSavedSignal(live: FormLiveState | undefined) {
   ))
 }
 
+function normalizeMoneyDropSpecialGroupText(value: string) {
+  const groups = value
+    .toUpperCase()
+    .split(/[\s,|/]+/)
+    .map(item => item.trim())
+    .filter(item => /^[ABC]$/.test(item))
+  return Array.from(new Set(groups)).join(', ')
+}
+
 type StoredFormSession = {
   sessions: Record<string, Session>
   adminSession: Session | null
@@ -1222,9 +1231,9 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     const rawValue = moneyDropSpecialDraft[roundIndex] ?? ''
     const value = roundIndex === 0
       ? (rawValue.toUpperCase().match(/[ABC]\s*[1-9]/g)?.map(item => item.replace(/\s+/g, '')) ?? []).filter((item, index, arr) => arr.indexOf(item) === index).join(', ')
-      : rawValue.trim().toUpperCase()
-    if (!value || (roundIndex === 1 && !/^[ABC]$/.test(value))) {
-      notify('err', roundIndex === 0 ? 'Please enter island names like A2, B3, C9.' : 'Please enter only A, B, or C.')
+      : normalizeMoneyDropSpecialGroupText(rawValue)
+    if (!value) {
+      notify('err', roundIndex === 0 ? 'Please enter island names like A2, B3, C9.' : 'Please enter A, B, C, or multiple groups like A, B.')
       return
     }
     if (!window.confirm('Do you confirm? Please check this Money Drop special input before sending.')) return
@@ -2067,9 +2076,9 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
                                     onChange={event => updateMoneyDropSpecialDraft(round.index, event.target.value)}
                                     onBlur={event => updateMoneyDropSpecialDraft(round.index, round.index === 0
                                       ? (event.target.value.toUpperCase().match(/[ABC]\s*[1-9]/g)?.map(item => item.replace(/\s+/g, '')) ?? []).filter((item, index, arr) => arr.indexOf(item) === index).join(', ')
-                                      : event.target.value.trim().toUpperCase())}
+                                      : normalizeMoneyDropSpecialGroupText(event.target.value))}
                                     disabled={!editable}
-                                    placeholder={round.index === 0 ? 'A2, B3, C9' : 'A / B / C'}
+                                    placeholder={round.index === 0 ? 'A2, B3, C9' : 'A, B, C'}
                                   />
                                   {round.error && <div className="form-round-error">{round.error}</div>}
                                 </td>

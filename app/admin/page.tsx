@@ -22,7 +22,7 @@ import {
   normalizeChatPermissions, type ChatPermissions,
 } from '@/lib/constants'
 import { AFTERNOON_SCORE_CSV_URL } from '@/lib/scoreboardSources'
-import { fetchWaveInputs, type WaveInputRow } from '@/lib/sheets'
+import { fetchWaveInputs, type WaveInputRow, type WaveInputsResult } from '@/lib/sheets'
 import {
   getGameState, setGameState,
   getActiveDisasterForWave, setActiveDisaster, getSubmissions, getSubmissionsForWave, subscribeStore, startCloudSync,
@@ -65,6 +65,7 @@ function AdminContent() {
   const [submissionWave, setSubmissionWave] = useState(getGameState().currentWave)
   const [submissionGame, setSubmissionGame] = useState<'bid'|'bet'>(getGameState().gameMode === 'bet' ? 'bet' : 'bid')
   const [sheetInputs, setSheetInputs] = useState<Record<number, WaveInputRow[]>>({})
+  const [pendingWritesByWave, setPendingWritesByWave] = useState<Record<number, NonNullable<WaveInputsResult['pendingWrites']>>>({})
   const [waveMeta,    setWaveMeta]    = useState<Record<number, WaveMeta>>({})
   const [savePulses,  setSavePulses]  = useState<Record<string, { count: number; at: number }>>({})
   const [nowTick,     setNowTick]     = useState(() => Date.now())
@@ -95,14 +96,17 @@ function AdminContent() {
   const fetchAll = useCallback(async () => {
     try {
       const inputs: Record<number, WaveInputRow[]> = {}
+      const pendingWrites: Record<number, NonNullable<WaveInputsResult['pendingWrites']>> = {}
       const meta: Record<number, WaveMeta> = {}
       for (let w=1; w<=TOTAL_WAVES; w++) {
         const data = await fetchWaveInputs(w)
         inputs[w] = data.rows
+        pendingWrites[w] = data.pendingWrites ?? []
         meta[w] = { king: data.king, viewingKing: data.viewingKing, disaster: data.kingDisaster }
         setActiveDisaster(w, data.kingDisaster)
       }
       setSheetInputs(inputs)
+      setPendingWritesByWave(pendingWrites)
       setWaveMeta(meta)
     } catch(e){ console.error(e) }
   }, [])
@@ -312,9 +316,20 @@ function AdminContent() {
     notify(`Reset count for Wave ${submissionWave}`)
   }
   const hasSubmittedForGame = (row: WaveInputRow, game: 'bid'|'bet') => game === 'bet' ? row.hasBetInput : row.hasBidInput
+  const hasPendingForGame = (row: WaveInputRow | undefined, game: 'bid'|'bet') => row?.pendingModes?.includes(game) === true
   const viewedSubmissionRows = sheetInputs[submissionWave] ?? []
-  const sheetSubmittedBaans = viewedSubmissionRows.filter(row => hasSubmittedForGame(row, submissionGame)).map(r=>r.baan)
+  const viewedPendingWrites = pendingWritesByWave[submissionWave] ?? []
+  const pendingGameWrites = viewedPendingWrites.filter(write => write.mode === submissionGame)
+  const pendingSavingWrites = pendingGameWrites.filter(write => write.saving && !write.error)
+  const pendingFailedWrites = pendingGameWrites.filter(write => write.error)
+  const pendingDisasterWrite = viewedPendingWrites.find(write => write.mode === 'select-disaster' && write.saving && !write.error)
+  const failedDisasterWrite = viewedPendingWrites.find(write => write.mode === 'select-disaster' && write.error)
+  const sheetSubmittedBaans = viewedSubmissionRows
+    .filter(row => hasSubmittedForGame(row, submissionGame) && !hasPendingForGame(row, submissionGame))
+    .map(r=>r.baan)
   const submittedBaans = Array.from(new Set(sheetSubmittedBaans))
+  const pendingBaans = Array.from(new Set(pendingSavingWrites.map(write => write.baan)))
+  const failedBaans = Array.from(new Set(pendingFailedWrites.map(write => write.baan)))
   const localSubmissionsCurrent = getSubmissionsForWave(submissionWave)
   const viewedWaveMeta = waveMeta[submissionWave] ?? { king: null, viewingKing: null, disaster: null }
   const ambassadorVisibility = normalizeAmbassadorVisibility(gs.ambassadorVisibility)
@@ -392,7 +407,7 @@ function AdminContent() {
                         <p className="text-label">Wave {submissionWave} submissions</p>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="badge badge-blue">{submissionGame === 'bet' ? 'Bet game' : 'Bid game'} - Google Sheet</span>
+                        <span className="badge badge-blue">{submissionGame === 'bet' ? 'Bet game' : 'Bid game'} - Sheet + pending</span>
                         <button onClick={resetSubmissionCounts} className="btn btn-ghost py-1.5 px-2 text-xs">
                           <RotateCcw size={12} /> reset count
                         </button>
@@ -430,7 +445,11 @@ function AdminContent() {
                         <div className={clsx('rounded-lg border px-3 py-2', viewedWaveMeta.disaster ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50')}>
                           <div className="text-label">Disaster selection</div>
                           <div className={clsx('text-sm font-bold', viewedWaveMeta.disaster ? 'text-green-700' : 'text-red-700')}>
-                            {viewedWaveMeta.disaster ? `Sent disaster ${viewedWaveMeta.disaster}` : 'no disaster'}
+                            {failedDisasterWrite
+                              ? `Failed: ${failedDisasterWrite.error}`
+                              : pendingDisasterWrite
+                                ? `Saving disaster ${pendingDisasterWrite.payload?.kingDisaster ?? '-'}`
+                                : viewedWaveMeta.disaster ? `Sent disaster ${viewedWaveMeta.disaster}` : 'no disaster'}
                           </div>
                         </div>
                       </div>
@@ -438,15 +457,19 @@ function AdminContent() {
                     <div className="admin-submission-grid grid grid-cols-1 gap-2 xl:grid-cols-2">
                       {Array.from({length:12},(_,i)=>i+1).map(b=>{
                         const row = viewedSubmissionRows.find(r=>r.baan===b)
-                        const done = row ? hasSubmittedForGame(row, submissionGame) : false
+                        const rowPending = hasPendingForGame(row, submissionGame)
+                        const rowFailed = Boolean(rowPending && row?.error)
+                        const pendingWrite = pendingGameWrites.find(write => write.baan === b)
+                        const rowSaving = Boolean(rowPending && row?.saving && !rowFailed)
+                        const done = row ? hasSubmittedForGame(row, submissionGame) && !rowPending : false
                         const localSub = localSubmissionsCurrent.find(s => s.baan === b)
                         const localKey = submissionKey(submissionWave, b)
                         const pulse = savePulses[localKey]
-                        const saving = Boolean(pulse && nowTick - pulse.at < 5000)
+                        const saving = rowSaving || Boolean(pulse && nowTick - pulse.at < 5000)
                         const changes = pulse?.count ?? 0
                         return (
                           <div key={b} className={clsx('admin-submission-card flex min-h-14 items-center gap-3 rounded-lg border px-3 py-2.5',
-                            done ? 'border-green-300 bg-green-50' : 'border-amber-200 bg-amber-50')}>
+                            rowFailed ? 'border-red-300 bg-red-50' : saving ? 'border-blue-300 bg-blue-50' : done ? 'border-green-300 bg-green-50' : 'border-amber-200 bg-amber-50')}>
                             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg font-mono font-black text-white"
                               style={{background:HOUSE_COLORS[b]}}>
                               {b}
@@ -454,20 +477,26 @@ function AdminContent() {
                             <div className="min-w-0 flex-1">
                               <div className="font-semibold" style={{color:HOUSE_COLORS[b]}}>{HOUSE_NAMES[b]}</div>
                               <div className="text-xs text-slate-500">
-                                {changes ? `${changes} changes${localSub?.timestamp ? ` - ${localSub.timestamp}` : ''}` : 'No local changes yet'}
+                                {rowFailed
+                                  ? pendingWrite?.error || 'Background save failed'
+                                  : saving
+                                    ? 'Waiting for Sheet save'
+                                    : changes ? `${changes} changes${localSub?.timestamp ? ` - ${localSub.timestamp}` : ''}` : 'No local changes yet'}
                               </div>
                             </div>
-                            <span className={clsx('badge shrink-0', saving ? 'badge-blue' : done ? 'badge-green' : 'badge-red')}>
-                              {saving ? 'Saving' : done ? 'Saved' : 'no data'}
+                            <span className={clsx('badge shrink-0', rowFailed ? 'badge-red' : saving ? 'badge-blue' : done ? 'badge-green' : 'badge-red')}>
+                              {rowFailed ? 'Failed' : saving ? 'Pending' : done ? 'Saved' : 'no data'}
                             </span>
-                            {done ? <CheckCircle2 className="shrink-0 text-green-500" size={18}/> : <Clock className="shrink-0 text-amber-500" size={18}/>} 
+                            {rowFailed ? <Clock className="shrink-0 text-red-500" size={18}/> : done ? <CheckCircle2 className="shrink-0 text-green-500" size={18}/> : <Clock className={clsx('shrink-0', saving ? 'text-blue-500' : 'text-amber-500')} size={18}/>} 
                           </div>
                         )
                       })}
                     </div>
-                    <div className="admin-submission-summary mt-4 grid grid-cols-2 gap-2 text-xs">
+                    <div className="admin-submission-summary mt-4 grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
                       <div className="rounded bg-green-50 px-3 py-2 text-green-700">Saved: {submittedBaans.length}/12</div>
-                      <div className="rounded bg-amber-50 px-3 py-2 text-amber-700">Waiting: {12-submittedBaans.length}</div>
+                      <div className="rounded bg-blue-50 px-3 py-2 text-blue-700">Pending: {pendingBaans.length}</div>
+                      <div className="rounded bg-red-50 px-3 py-2 text-red-700">Failed: {failedBaans.length}</div>
+                      <div className="rounded bg-amber-50 px-3 py-2 text-amber-700">Waiting: {Math.max(0, 12 - new Set([...submittedBaans, ...pendingBaans]).size)}</div>
                     </div>
                   </div>
                 )}

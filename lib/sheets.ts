@@ -170,9 +170,31 @@ export interface WaveInputRow {
   hasInput: boolean
   hasBetInput: boolean
   hasBidInput: boolean
+  pending?: boolean
+  saving?: boolean
+  error?: string
+  pendingModes?: string[]
 }
 
-export async function fetchWaveInputs(wave: number): Promise<{ rows: WaveInputRow[]; king: number | null; viewingKing: number | null; kingDisaster: number | null }> {
+export type WaveInputsResult = {
+  rows: WaveInputRow[]
+  king: number | null
+  viewingKing: number | null
+  kingDisaster: number | null
+  pendingWrites?: Array<{
+    clientId: string
+    wave: number
+    baan: number
+    mode: string
+    saving: boolean
+    error: string
+    submittedAt: string
+    updatedAt: string
+    payload?: WritePayload
+  }>
+}
+
+export async function fetchRawWaveInputs(wave: number): Promise<WaveInputsResult> {
   const rows = await fetchWaveRangeGViz(wave, 'A5:U16')
   const numberAt = (row: string[], idx: number) => parseFloat(String(row[idx] ?? 0)) || 0
   const textAt = (row: string[], idx: number) => String(row[idx] ?? '').trim()
@@ -241,6 +263,19 @@ export async function fetchWaveInputs(wave: number): Promise<{ rows: WaveInputRo
   let kingDisaster: number | null = parseInt(String(infoCell?.[0]?.[0] ?? '').trim())
   if (isNaN(kingDisaster)) kingDisaster = null
   return { rows: parsed, king, viewingKing, kingDisaster }
+}
+
+export async function fetchWaveInputs(wave: number): Promise<WaveInputsResult> {
+  if (typeof window === 'undefined') return fetchRawWaveInputs(wave)
+
+  const res = await fetch(`/api/sheets/wave-inputs?wave=${encodeURIComponent(String(wave))}`, {
+    cache: 'no-store',
+  })
+  const data = await res.json().catch(() => ({} as { message?: string }))
+  if (!res.ok || (data as { ok?: boolean }).ok === false) {
+    throw new Error((data as { message?: string }).message || 'Failed to fetch wave inputs')
+  }
+  return data as WaveInputsResult
 }
 
 export interface GroupChatMessage {
@@ -533,6 +568,7 @@ export interface WritePayload {
   action: 'writeWave'
   wave:   number
   baan:   number
+  clientId?: string
   // Bet game
   betTarget?: number   // Col C: บ้านที่เดิมพัน (1-12)
   betAmount?: number   // Col D: จำนวนเงิน
@@ -557,7 +593,7 @@ function shouldRetrySheetWrite(status: number, message: string) {
   return status === 429 || status >= 500 || /busy|retry|lock|timeout|timed out|temporarily/i.test(message)
 }
 
-export async function writeToSheet(payload: WritePayload): Promise<{ ok: boolean; message?: string }> {
+export async function writeToSheet(payload: WritePayload): Promise<{ ok: boolean; message?: string; queued?: boolean; saving?: boolean; clientId?: string }> {
   let lastMessage = 'Google Sheet write failed'
 
   for (let attempt = 0; attempt < SHEET_WRITE_RETRY_DELAYS_MS.length; attempt++) {
@@ -571,9 +607,17 @@ export async function writeToSheet(payload: WritePayload): Promise<{ ok: boolean
         body: JSON.stringify(payload),
         cache: 'no-store',
       })
-      const data = await res.json().catch(() => ({} as { message?: string }))
+      const data = await res.json().catch(() => ({} as { message?: string; queued?: boolean; saving?: boolean; clientId?: string }))
       lastMessage = data?.message || (res.ok ? 'Sent to Google Sheet' : 'Google Sheet write failed')
-      if (res.ok && data?.ok !== false) return { ok: true, message: lastMessage }
+      if (res.ok && data?.ok !== false) {
+        return {
+          ok: true,
+          message: lastMessage,
+          queued: data?.queued === true,
+          saving: data?.saving === true,
+          clientId: data?.clientId,
+        }
+      }
       if (!shouldRetrySheetWrite(res.status, lastMessage)) return { ok: false, message: lastMessage }
     } catch (e) {
       lastMessage = e instanceof Error ? e.message : String(e)

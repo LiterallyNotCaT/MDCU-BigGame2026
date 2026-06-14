@@ -196,6 +196,10 @@ function moneyDropSpecialBaseFormKey(liveKey: string) {
   return liveKey.slice(0, -'::money-drop-special'.length)
 }
 
+function isUnknownGasAction(error: unknown) {
+  return /unknown action/i.test(error instanceof Error ? error.message : String(error))
+}
+
 async function persistFormControlTarget(
   payload: Record<string, unknown>,
   admin: AdminContext,
@@ -222,23 +226,30 @@ async function persistFormControlTargets(
   admin: AdminContext,
   targets: ResolvedControlTarget[],
 ) {
-  const result = await callGas<{
+  let result: {
     status: string
     message?: string
     targets?: Array<{ formKey: string; roundCount: number }>
     errors?: Array<{ formKey: string; message: string }>
-  }>({
-    action: admin.oauth ? 'setFormRoundControlsOAuth' : 'setFormRoundControls',
-    password: admin.password,
-    email: admin.email,
-    oauth: admin.oauth,
-    allRounds: true,
-    targets: targets.map(target => ({
-      formKey: target.formKey,
-      roundCount: target.rounds.length,
-    })),
-    ...gasControlPatchFromPayload(payload),
-  })
+  }
+  try {
+    result = await callGas({
+      action: admin.oauth ? 'setFormRoundControlsOAuth' : 'setFormRoundControls',
+      password: admin.password,
+      email: admin.email,
+      oauth: admin.oauth,
+      allRounds: true,
+      targets: targets.map(target => ({
+        formKey: target.formKey,
+        roundCount: target.rounds.length,
+      })),
+      ...gasControlPatchFromPayload(payload),
+    })
+  } catch (error) {
+    if (!isUnknownGasAction(error)) throw error
+    await Promise.all(targets.map(target => persistFormControlTarget(payload, admin, target)))
+    return { status: 'ok', message: 'Updated with single-form fallback' }
+  }
   if (result.errors?.length) {
     throw new Error(result.errors.map(error => error.message || error.formKey).join(', '))
   }
@@ -253,19 +264,24 @@ async function persistMoneyDropSpecialControlTarget(
 ) {
   const formKey = moneyDropSpecialBaseFormKey(target.formKey)
   for (const roundIndex of target.rounds) {
-    const result = await callGas<{
+    let result: {
       status: string
       message?: string
       state?: MoneyDropSpecialState
-    }>({
-      action: admin.oauth ? 'setMoneyDropSpecialControlOAuth' : 'setMoneyDropSpecialControl',
-      formKey,
-      password: admin.password,
-      email: admin.email,
-      oauth: admin.oauth,
-      roundIndex,
-      ...gasControlPatchFromPayload(payload),
-    })
+    } = { status: 'ok' }
+    try {
+      result = await callGas({
+        action: admin.oauth ? 'setMoneyDropSpecialControlOAuth' : 'setMoneyDropSpecialControl',
+        formKey,
+        password: admin.password,
+        email: admin.email,
+        oauth: admin.oauth,
+        roundIndex,
+        ...gasControlPatchFromPayload(payload),
+      })
+    } catch (error) {
+      if (!isUnknownGasAction(error)) throw error
+    }
     const rounds = result.state?.rounds?.length
       ? result.state.rounds
       : target.rounds.map(index => ({ index, ...patch }))

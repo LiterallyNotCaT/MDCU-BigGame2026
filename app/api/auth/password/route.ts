@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { cacheAccessSession } from '@/lib/accessSessionCache'
 import { callGas } from '@/lib/gas'
 
 export const runtime = 'nodejs'
@@ -31,6 +32,14 @@ export async function POST(req: Request) {
       password: payload.password ?? '',
       token: payload.token ?? '',
     })
+    if (data.ok === true) {
+      await cacheAccessSession({
+        kind: payload.kind ?? '',
+        pageKey: payload.pageKey ?? '',
+        baan: payload.baan ?? null,
+        token: data.token || payload.token || '',
+      })
+    }
     return NextResponse.json({
       ok: data.ok === true,
       token: data.token,

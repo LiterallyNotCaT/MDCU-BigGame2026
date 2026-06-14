@@ -261,6 +261,11 @@ export function saveSubmission(sub: WaveSubmission) {
 }
 export { saveSubmission as addSubmission }
 
+export function deleteSubmissionForBaanWave(baan: number, wave: number) {
+  const next = getSubmissions().filter(s => !(s.baan === baan && s.wave === wave))
+  write(KEY_SUBMISSIONS, next)
+}
+
 export function getSubmissionsForWave(wave: number): WaveSubmission[] {
   return getSubmissions().filter(s => s.wave === wave)
 }

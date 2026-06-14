@@ -55,14 +55,29 @@ export interface ScoringFormAuth {
   message?: string
 }
 
+type InferredFormMeta = Pick<ScoringFormConfig, 'kind' | 'defaultFillToRank' | 'allowTies' | 'blank' | 'rankCount' | 'maxRounds' | 'usesAutoRemainder' | 'autoAfterHouseCount'>
+
 export function formKeyFor(tab: string, user: string, gid: string) {
   return `${tab}|${user}|${gid}`
+}
+
+function isAfternoonGamesTab(tab: string) {
+  return /\bgames\b/i.test(String(tab || ''))
+}
+
+function capAfternoonMiniGameRounds<T extends InferredFormMeta>(tab: string, normalizedUser: string, meta: T): T {
+  if (!isAfternoonGamesTab(tab)) return meta
+  if (normalizedUser === 'money drop' || normalizedUser === 'snake ladder' || normalizedUser === 'event') return meta
+  return {
+    ...meta,
+    maxRounds: meta.maxRounds ? Math.min(meta.maxRounds, 4) : 4,
+  }
 }
 
 export function inferFormKind(
   tab: string,
   user: string
-): Pick<ScoringFormConfig, 'kind' | 'defaultFillToRank' | 'allowTies' | 'blank' | 'rankCount' | 'maxRounds' | 'usesAutoRemainder' | 'autoAfterHouseCount'> {
+): InferredFormMeta {
   const normalized = user.toLowerCase().replace(/\s+/g, ' ').trim()
   if (normalized === 'money drop') {
     return { kind: 'score-number', defaultFillToRank: 1, allowTies: false, blank: false, rankCount: 12, maxRounds: 2, usesAutoRemainder: false, autoAfterHouseCount: 0 }
@@ -74,15 +89,19 @@ export function inferFormKind(
     return { kind: 'placeholder', defaultFillToRank: 0, allowTies: false, blank: true, rankCount: 0, maxRounds: 0, usesAutoRemainder: false, autoAfterHouseCount: 0 }
   }
   if (normalized.includes('dodge ball') || normalized.includes('territory control')) {
-    return { kind: 'match-single', defaultFillToRank: 1, allowTies: false, blank: false, rankCount: 2, maxRounds: 6, usesAutoRemainder: false, autoAfterHouseCount: 0 }
+    return capAfternoonMiniGameRounds(tab, normalized, { kind: 'match-single', defaultFillToRank: 1, allowTies: false, blank: false, rankCount: 2, maxRounds: 6, usesAutoRemainder: false, autoAfterHouseCount: 0 })
   }
   if (normalized.includes('escape') && tab === 'เช้าบน') {
     return { kind: 'ranking-single', defaultFillToRank: 6, allowTies: false, blank: false, rankCount: 7, maxRounds: 2, usesAutoRemainder: true, autoAfterHouseCount: 6 }
   }
   if (normalized.includes('stacking block') || normalized.includes('escape')) {
-    return normalized.includes('escape')
+    const meta: InferredFormMeta = normalized.includes('escape')
       ? { kind: 'ranking-single', defaultFillToRank: 6, allowTies: false, blank: false, rankCount: 7, maxRounds: 2, usesAutoRemainder: true, autoAfterHouseCount: 6 }
-      : { kind: 'ranking-single', defaultFillToRank: 4, allowTies: false, blank: false, rankCount: 4, maxRounds: 6, usesAutoRemainder: false, autoAfterHouseCount: 0 }
+      : { kind: 'ranking-single', defaultFillToRank: 4, allowTies: true, blank: false, rankCount: 4, maxRounds: 6, usesAutoRemainder: false, autoAfterHouseCount: 0 }
+    return capAfternoonMiniGameRounds(tab, normalized, meta)
+  }
+  if (isAfternoonGamesTab(tab)) {
+    return { kind: 'ranking-group', defaultFillToRank: 3, allowTies: true, blank: false, rankCount: 4, maxRounds: 4, usesAutoRemainder: true, autoAfterHouseCount: 3 }
   }
   return { kind: 'ranking-group', defaultFillToRank: 3, allowTies: true, blank: false, rankCount: 4, maxRounds: tab === 'เช้าบน' ? 4 : 0, usesAutoRemainder: true, autoAfterHouseCount: 3 }
 }

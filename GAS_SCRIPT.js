@@ -73,8 +73,14 @@ function doPost(e) {
     } else if (payload.action === 'readEventStatus') {
       const result = handleReadEventStatus(payload)
       output.setContent(JSON.stringify(result))
+    } else if (payload.action === 'readEventAnswer') {
+      const result = handleReadEventAnswer(payload)
+      output.setContent(JSON.stringify(result))
     } else if (payload.action === 'submitEventAnswer') {
       const result = handleSubmitEventAnswer(payload)
+      output.setContent(JSON.stringify(result))
+    } else if (payload.action === 'writeEventAnswerResult') {
+      const result = handleWriteEventAnswerResult(payload)
       output.setContent(JSON.stringify(result))
     } else if (payload.action === 'setEventSolutionVisible') {
       const result = handleSetEventSolutionVisible(payload)
@@ -494,7 +500,7 @@ function handleAuthAccess(payload) {
 }
 
 function formConfigCacheKey_(includePasswords) {
-  return `FORM_CONFIG_V13_${includePasswords ? 'private' : 'public'}`
+  return `FORM_CONFIG_V14_${includePasswords ? 'private' : 'public'}`
 }
 
 function formAdminPasswordCacheKey_() {
@@ -502,11 +508,23 @@ function formAdminPasswordCacheKey_() {
 }
 
 function formStateCacheKey_(form) {
-  return `FORM_STATE_V8_${cacheKeyPart_(form.formKey)}`
+  return `FORM_STATE_V9_${cacheKeyPart_(form.formKey)}`
 }
 
 function invalidateFormState_(form) {
   cacheRemove_(formStateCacheKey_(form))
+}
+
+function isAfternoonGamesTab_(tab) {
+  return /\bgames\b/i.test(String(tab || ''))
+}
+
+function capAfternoonMiniGameRounds_(tab, normalizedUser, meta) {
+  if (!isAfternoonGamesTab_(tab)) return meta
+  if (normalizedUser === 'money drop' || normalizedUser === 'snake ladder' || normalizedUser === 'event') return meta
+  const next = Object.assign({}, meta)
+  next.maxRounds = next.maxRounds ? Math.min(next.maxRounds, 4) : 4
+  return next
 }
 
 function inferFormMeta_(tab, user) {
@@ -521,15 +539,19 @@ function inferFormMeta_(tab, user) {
     return { kind: 'placeholder', defaultFillToRank: 0, allowTies: false, blank: true, rankCount: 0, maxRounds: 0, usesAutoRemainder: false, autoAfterHouseCount: 0 }
   }
   if (normalized.indexOf('dodge ball') >= 0 || normalized.indexOf('territory control') >= 0) {
-    return { kind: 'match-single', defaultFillToRank: 1, allowTies: false, blank: false, rankCount: 2, maxRounds: 6, usesAutoRemainder: false, autoAfterHouseCount: 0 }
+    return capAfternoonMiniGameRounds_(tab, normalized, { kind: 'match-single', defaultFillToRank: 1, allowTies: false, blank: false, rankCount: 2, maxRounds: 6, usesAutoRemainder: false, autoAfterHouseCount: 0 })
   }
   if (normalized.indexOf('escape') >= 0 && String(tab) === 'เช้าบน') {
     return { kind: 'ranking-single', defaultFillToRank: 6, allowTies: false, blank: false, rankCount: 7, maxRounds: 2, usesAutoRemainder: true, autoAfterHouseCount: 6 }
   }
   if (normalized.indexOf('stacking block') >= 0 || normalized.indexOf('escape') >= 0) {
-    return normalized.indexOf('escape') >= 0
+    const meta = normalized.indexOf('escape') >= 0
       ? { kind: 'ranking-single', defaultFillToRank: 6, allowTies: false, blank: false, rankCount: 7, maxRounds: 2, usesAutoRemainder: true, autoAfterHouseCount: 6 }
       : { kind: 'ranking-single', defaultFillToRank: 4, allowTies: false, blank: false, rankCount: 4, maxRounds: 6, usesAutoRemainder: false, autoAfterHouseCount: 0 }
+    return capAfternoonMiniGameRounds_(tab, normalized, meta)
+  }
+  if (isAfternoonGamesTab_(tab)) {
+    return { kind: 'ranking-group', defaultFillToRank: 3, allowTies: true, blank: false, rankCount: 4, maxRounds: 4, usesAutoRemainder: true, autoAfterHouseCount: 3 }
   }
   return { kind: 'ranking-group', defaultFillToRank: 3, allowTies: true, blank: false, rankCount: 4, maxRounds: String(tab) === 'เช้าบน' ? 4 : 0, usesAutoRemainder: true, autoAfterHouseCount: 3 }
 }
@@ -1350,7 +1372,7 @@ function moneyDropSpecialRoundState_(formKey, index, label, wave, value) {
   const hasControl = Boolean(control.rounds && Object.prototype.hasOwnProperty.call(control.rounds, roundKey))
   const roundControl = hasControl ? control.rounds[roundKey] || {} : {}
   const blank = !String(value || '').trim()
-  return {
+  const result = {
     index,
     label,
     wave,
@@ -1376,8 +1398,17 @@ function normalizeMoneyDropSpecialIslandList_(value) {
 }
 
 function normalizeMoneyDropSpecialGroup_(value) {
-  const clean = String(value || '').trim().toUpperCase()
-  return /^[ABC]$/.test(clean) ? clean : ''
+  const parts = String(value || '').toUpperCase().split(/[\s,|/]+/)
+  const seen = {}
+  const result = []
+  parts.forEach(item => {
+    const group = String(item || '').trim()
+    if (/^[ABC]$/.test(group) && !seen[group]) {
+      seen[group] = true
+      result.push(group)
+    }
+  })
+  return result.join(', ')
 }
 
 function normalizeMoneyDropSpecialValue_(roundIndex, value) {
@@ -1420,7 +1451,7 @@ function writeMoneyDropSpecialForUser_(form, payload, username) {
   const roundIndex = Number(payload.roundIndex)
   if (!Number.isInteger(roundIndex) || roundIndex < 0 || roundIndex > 1) return { status: 'error', message: 'Invalid round' }
   const value = normalizeMoneyDropSpecialValue_(roundIndex, payload.value)
-  if (!value) return { status: 'error', message: roundIndex === 0 ? 'Please enter island names like A2, B3, C9.' : 'Please enter only A, B, or C.' }
+  if (!value) return { status: 'error', message: roundIndex === 0 ? 'Please enter island names like A2, B3, C9.' : 'Please enter A, B, C, or multiple groups like A, B.' }
 
   let lock = null
   try {
@@ -1651,6 +1682,49 @@ function handleReadEventStatus(payload) {
   return readEventStatus_(payload.wave, { includeSolutionImage: payload.includeSolutionImage === true })
 }
 
+function handleReadEventAnswer(payload) {
+  const config = eventWaveConfig_(payload.wave)
+  if (!config) return { status: 'error', message: 'Event is available only in wave 2 or wave 4' }
+  const sheet = openEventSheet_()
+  const answers = eventAnswerOptions_(sheet.getRange(20, config.answerCol).getDisplayValue())
+  if (!answers.length) return { status: 'error', message: 'Correct answer is not configured' }
+  return { status: 'ok', wave: config.wave, answers }
+}
+
+function handleWriteEventAnswerResult(payload) {
+  const config = eventWaveConfig_(payload.wave)
+  if (!config) return { status: 'error', message: 'Event is available only in wave 2 or wave 4' }
+  const baan = Number(payload.baan)
+  if (!Number.isInteger(baan) || baan < 1 || baan > 12) return { status: 'error', message: 'Invalid house' }
+  if (!verifyAccessToken_({ kind: 'baan', baan, token: payload.token })) return { status: 'error', message: 'Unauthorized' }
+
+  let lock = null
+  try {
+    lock = acquireNamedLock_('EVENT_LOCK', 45000)
+    const sheet = openEventSheet_()
+    const row = 7 + baan
+    const cell = sheet.getRange(row, config.timeCol)
+    const existing = cell.getValue()
+    const existingTime = eventTimeValue_(existing)
+
+    if (!Number.isFinite(existingTime)) {
+      const submittedMs = eventTimeValue_(payload.submittedAt)
+      const submittedAt = Number.isFinite(submittedMs) ? new Date(submittedMs) : new Date()
+      cell.setValue(submittedAt)
+      cell.setNumberFormat('yyyy-mm-dd hh:mm:ss.000')
+    }
+
+    const results = rankEventAnswers_(sheet, config)
+    SpreadsheetApp.flush()
+    const rank = results.find(item => item.baan === baan)?.rank ?? null
+    return { status: 'ok', correct: true, rank, results }
+  } catch (err) {
+    return { status: 'error', message: /lock|busy/i.test(String(err)) ? 'Event sheet is busy. Please retry.' : String(err) }
+  } finally {
+    releaseNamedLock_(lock)
+  }
+}
+
 function handleSubmitEventAnswer(payload) {
   const config = eventWaveConfig_(payload.wave)
   if (!config) return { status: 'error', message: 'Event is available only in wave 2 or wave 4' }
@@ -1674,7 +1748,7 @@ function handleSubmitEventAnswer(payload) {
     }
 
     const existing = sheet.getRange(row, config.timeCol).getValue()
-    if (eventTimeValue_(existing)) {
+    if (Number.isFinite(eventTimeValue_(existing))) {
       const results = rankEventAnswers_(sheet, config)
       const rank = results.find(item => item.baan === baan)?.rank ?? null
       return { status: 'ok', correct: true, alreadyCorrect: true, rank, results }
@@ -1759,6 +1833,12 @@ function rowCellNumber_(values, displayValues, col) {
   return numberFrom_(values[col - 1]) || numberFrom_(displayValues[col - 1])
 }
 
+function waveWriteCacheKey_(payload, waveNumber, baanNumber) {
+  const clientId = String(payload && payload.clientId || '').trim()
+  if (!clientId) return ''
+  return `waveWrite:${waveNumber}:${baanNumber}:${cacheKeyPart_(clientId)}`
+}
+
 function handleWriteWave(payload) {
   const { wave, baan, betTarget, betAmount, kingAmount, kingDisaster, islands } = payload
   const waveNumber = numberFrom_(wave)
@@ -1791,9 +1871,15 @@ function handleWriteWave(payload) {
     return { status: 'error', message: 'Island bid minimum is 100' }
   }
 
+  const idempotencyKey = waveWriteCacheKey_(payload, waveNumber, baanNumber)
+  const cachedResult = idempotencyKey ? cacheGetJson_(idempotencyKey) : null
+  if (cachedResult && cachedResult.status === 'ok') return Object.assign({}, cachedResult, { replayed: true })
+
   let lock = null
   try {
     lock = acquireNamedLock_('WAVE_WRITE_LOCK', 45000)
+    const cachedAfterLock = idempotencyKey ? cacheGetJson_(idempotencyKey) : null
+    if (cachedAfterLock && cachedAfterLock.status === 'ok') return Object.assign({}, cachedAfterLock, { replayed: true })
 
   const ss        = SpreadsheetApp.openById(SHEET_ID)
   const sheetName = `Wave ${waveNumber}`
@@ -1818,7 +1904,7 @@ function handleWriteWave(payload) {
     if (kingDisaster === null || kingDisaster === '') disasterCell.clearContent()
     else disasterCell.setValue(kingDisasterNumber)
     SpreadsheetApp.flush()
-    return {
+    const result = {
       status: 'ok',
       message: `บ้าน ${baanNumber} Wave ${waveNumber} saved disaster`,
       written: {
@@ -1829,6 +1915,8 @@ function handleWriteWave(payload) {
         remainingBalance: null,
       }
     }
+    if (idempotencyKey) cachePutJson_(idempotencyKey, result, 21600)
+    return result
   }
 
   // ── Read current balance to validate ──────────────────
@@ -1913,7 +2001,7 @@ function handleWriteWave(payload) {
   // ── Flush to sheet ─────────────────────────────────────
   SpreadsheetApp.flush()
 
-  return {
+  const result = {
     status: 'ok',
     message: `บ้าน ${baan} Wave ${wave} บันทึกแล้ว`,
     written: {
@@ -1927,6 +2015,8 @@ function handleWriteWave(payload) {
       remainingBalance: currentBalance - totalSpendAfterSave,
     }
   }
+  if (idempotencyKey) cachePutJson_(idempotencyKey, result, 21600)
+  return result
   } catch (err) {
     const message = String(err && err.message ? err.message : err)
     return {

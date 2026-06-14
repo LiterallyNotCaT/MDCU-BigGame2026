@@ -50,8 +50,12 @@ function normalizeIslandList(value: unknown) {
 }
 
 function normalizeGroup(value: unknown) {
-  const clean = String(value ?? '').trim().toUpperCase()
-  return /^[ABC]$/.test(clean) ? clean : ''
+  const groups = String(value ?? '')
+    .toUpperCase()
+    .split(/[\s,|/]+/)
+    .map(item => item.trim())
+    .filter(item => /^[ABC]$/.test(item))
+  return Array.from(new Set(groups)).join(', ')
 }
 
 function normalizeValue(roundIndex: number, value: unknown) {
@@ -155,7 +159,7 @@ export async function POST(req: Request) {
 
     const value = normalizeValue(roundIndex, payload.value)
     if (!value) {
-      return jsonError(roundIndex === 0 ? 'Please enter island names like A2, B3, C9.' : 'Please enter only A, B, or C.', 400)
+      return jsonError(roundIndex === 0 ? 'Please enter island names like A2, B3, C9.' : 'Please enter A, B, C, or multiple groups like A, B.', 400)
     }
 
     const liveKey = specialLiveKey(formKey)

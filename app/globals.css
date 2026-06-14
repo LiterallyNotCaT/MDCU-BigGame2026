@@ -6444,4 +6444,39 @@ body.fullscreen-fallback-open {
   text-shadow: none !important;
 }
 
+.game-map .map-tile-owner,
+.game-map .map-tile-filter-mode .map-tile-owner,
+.game-map .map-tile-filter-hit .map-tile-owner,
+.game-map .map-tile-king-hit-selection .map-tile-owner {
+  background: var(--owner-bg, #ffffff) !important;
+  border: 1px solid rgba(15, 23, 42, 0.32) !important;
+  color: var(--owner-fg, #111827) !important;
+  text-shadow: none !important;
+}
+
+.game-map .map-tile-sheet-disastered .map-tile-owner.is-disastered,
+.game-map .map-tile-eradicated .map-tile-owner.is-eradicated,
+.game-map .map-tile-filter-hit .map-tile-owner.is-disastered,
+.game-map .map-tile-filter-hit .map-tile-owner.is-eradicated {
+  background: #ffffff !important;
+  border-color: rgba(15, 23, 42, 0.38) !important;
+  text-shadow: none !important;
+}
+
+.game-map .map-tile-sheet-disastered .map-tile-owner.is-disastered,
+.game-map .map-tile-filter-hit .map-tile-owner.is-disastered {
+  color: #dc2626 !important;
+  text-decoration-line: line-through !important;
+  text-decoration-thickness: 2px !important;
+  text-decoration-color: #dc2626 !important;
+}
+
+.game-map .map-tile-eradicated .map-tile-owner.is-eradicated,
+.game-map .map-tile-filter-hit .map-tile-owner.is-eradicated {
+  color: #1d4ed8 !important;
+  text-decoration-line: line-through !important;
+  text-decoration-thickness: 2px !important;
+  text-decoration-color: #1d4ed8 !important;
+}
+
 

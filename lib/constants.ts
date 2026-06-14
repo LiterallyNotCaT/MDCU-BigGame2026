@@ -168,9 +168,15 @@ export interface LeaderboardEntry {
 
 // House color palette
 export const HOUSE_COLORS: Record<number, string> = {
-  1:  '#ef4444', 2:  '#f97316', 3:  '#eab308', 4:  '#22c55e',
-  5:  '#3b82f6', 6:  '#8b5cf6', 7:  '#ec4899', 8:  '#06b6d4',
-  9:  '#f59e0b', 10: '#10b981', 11: '#6366f1', 12: '#e11d48',
+  1:  '#EFBA45', 2:  '#D55B5B', 3:  '#320B35', 4:  '#75E2E0',
+  5:  '#081D56', 6:  '#695243', 7:  '#604361', 8:  '#BF5A7B',
+  9:  '#2D5A27', 10: '#FFFFC1', 11: '#F09835', 12: '#6AB87E',
+}
+
+export const HOUSE_TEXT_COLORS: Record<number, string> = {
+  1:  '#111827', 2:  '#111827', 3:  '#FFFFFF', 4:  '#111827',
+  5:  '#FFFFFF', 6:  '#FFFFFF', 7:  '#FFFFFF', 8:  '#111827',
+  9:  '#FFFFFF', 10: '#111827', 11: '#111827', 12: '#111827',
 }
 
 export const HOUSE_NAMES: Record<number, string> = {

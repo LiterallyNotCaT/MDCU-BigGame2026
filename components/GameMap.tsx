@@ -1,7 +1,7 @@
 'use client'
 import { memo } from 'react'
 import clsx from 'clsx'
-import { HOUSE_COLORS, DISASTER_AREAS } from '@/lib/constants'
+import { HOUSE_COLORS, HOUSE_TEXT_COLORS, DISASTER_AREAS } from '@/lib/constants'
 
 interface MapProps {
   ownership:       Record<string, number>
@@ -186,7 +186,11 @@ function GameMap({
 
                     {owner > 0 && (
                       <span className={clsx('map-tile-owner font-mono text-[10px] font-black', isSheetDisastered && 'is-disastered', isEradicated && 'is-eradicated')}
-                        style={{ '--owner-color': HOUSE_COLORS[owner], background: `${HOUSE_COLORS[owner]}18` } as React.CSSProperties}>
+                        style={{
+                          '--owner-color': HOUSE_COLORS[owner],
+                          '--owner-bg': HOUSE_COLORS[owner],
+                          '--owner-fg': HOUSE_TEXT_COLORS[owner],
+                        } as React.CSSProperties}>
                         บ้าน {owner}
                       </span>
                     )}
