@@ -106,6 +106,8 @@ function GameMap({
                 const owner       = eradicatedOwner || disasterOwner || currentOwner
                 const isSheetDisastered = disasterOwner > 0
                 const isEradicated = eradicatedOwner > 0
+                const ownerBadgeBg = isSheetDisastered || isEradicated ? '#ffffff' : owner > 0 ? HOUSE_COLORS[owner] : '#ffffff'
+                const ownerBadgeFg = isSheetDisastered ? '#dc2626' : isEradicated ? '#1d4ed8' : owner > 0 ? HOUSE_TEXT_COLORS[owner] : '#111827'
                 const isSelected  = selected.includes(area)
                 const disasters   = getAreaDisasters(area)
                 const isFiltered  = filterSet?.has(area) ?? false
@@ -188,8 +190,10 @@ function GameMap({
                       <span className={clsx('map-tile-owner font-mono text-[10px] font-black', isSheetDisastered && 'is-disastered', isEradicated && 'is-eradicated')}
                         style={{
                           '--owner-color': HOUSE_COLORS[owner],
-                          '--owner-bg': HOUSE_COLORS[owner],
-                          '--owner-fg': HOUSE_TEXT_COLORS[owner],
+                          '--owner-bg': ownerBadgeBg,
+                          '--owner-fg': ownerBadgeFg,
+                          backgroundColor: ownerBadgeBg,
+                          color: ownerBadgeFg,
                         } as React.CSSProperties}>
                         บ้าน {owner}
                       </span>

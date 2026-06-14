@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+import { after, NextResponse } from 'next/server'
 import { auth, isAllowedDocChulaEmail } from '@/auth'
 import { cacheFormAdminPassword, readCachedFormAdminPassword } from '@/lib/formAdminAuthCache'
 import { publishFormRoundPatch, publishFullFormState } from '@/lib/formLive'
@@ -66,43 +66,19 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, message: 'Invalid round' }, { status: 400 })
     }
 
-    const states: Record<string, ScoringFormState> = {}
     const normalTargets = targets.filter(target => !isMoneyDropSpecialLiveKey(target.formKey))
     const specialTargets = targets.filter(target => isMoneyDropSpecialLiveKey(target.formKey))
 
-    if (normalTargets.length > 1) {
-      await persistFormControlTargets(payload, admin, normalTargets)
-      await Promise.all(normalTargets.map(target => publishFormRoundPatch(
-        target.formKey,
-        target.rounds.map(index => ({ index, ...patch })),
-      )))
-    } else if (normalTargets.length === 1) {
-      const target = normalTargets[0]
-      const result = await persistFormControlTarget(payload, admin, target)
-      if (result.state) {
-        const state = normalizeScoringFormState(result.state)
-        states[target.formKey] = state
-        await publishFullFormState(state, { authoritative: true })
-      } else {
-        await publishFormRoundPatch(
-          target.formKey,
-          target.rounds.map(index => ({ index, ...patch })),
-        )
-      }
-    }
-
-    for (const target of specialTargets) {
-      await persistMoneyDropSpecialControlTarget(payload, admin, target, patch)
-    }
+    await publishControlTargets(targets, patch)
+    after(() => persistControlTargetsInBackground(payload, admin, normalTargets, specialTargets, patch))
 
     return NextResponse.json({
       ok: true,
+      queued: true,
       message: 'Updated',
       data: {
         patch,
         targets,
-        states,
-        state: Object.keys(states).length === 1 ? Object.values(states)[0] : undefined,
       },
     }, {
       headers: { 'Cache-Control': 'no-store' },
@@ -179,6 +155,18 @@ function controlPatchFromPayload(payload: Record<string, unknown>): ControlPatch
   return Object.keys(patch).length ? patch : null
 }
 
+async function publishControlTargets(targets: ResolvedControlTarget[], patch: ControlPatch, error = '') {
+  await Promise.all(targets.map(target => publishFormRoundPatch(
+    target.formKey,
+    target.rounds.map(index => ({
+      index,
+      ...patch,
+      saving: false,
+      error,
+    })),
+  )))
+}
+
 function gasControlPatchFromPayload(payload: Record<string, unknown>) {
   const patch: Record<string, unknown> = {}
   if (payload.confirmed !== undefined) patch.confirmed = payload.confirmed === true
@@ -186,6 +174,64 @@ function gasControlPatchFromPayload(payload: Record<string, unknown>) {
   if (payload.clearDeadline === true) patch.clearDeadline = true
   if (payload.deadlineMinutes !== undefined) patch.deadlineMinutes = payload.deadlineMinutes
   return patch
+}
+
+async function persistControlTargetsInBackground(
+  payload: Record<string, unknown>,
+  admin: AdminContext,
+  normalTargets: ResolvedControlTarget[],
+  specialTargets: ResolvedControlTarget[],
+  patch: ControlPatch,
+) {
+  await Promise.all([
+    persistNormalControlTargetsInBackground(payload, admin, normalTargets, patch),
+    ...specialTargets.map(target => persistSpecialControlTargetInBackground(payload, admin, target, patch)),
+  ])
+}
+
+async function persistNormalControlTargetsInBackground(
+  payload: Record<string, unknown>,
+  admin: AdminContext,
+  targets: ResolvedControlTarget[],
+  patch: ControlPatch,
+) {
+  if (!targets.length) return
+
+  try {
+    if (targets.length > 1) {
+      await persistFormControlTargets(payload, admin, targets)
+      return
+    }
+
+    const target = targets[0]
+    const result = await persistFormControlTarget(payload, admin, target)
+    if (result.state) {
+      await publishFullFormState(normalizeScoringFormState(result.state))
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.error('Form control background persist failed:', message)
+    await publishControlTargets(targets, patch, message).catch(err => {
+      console.error('Form control live error publish failed:', err)
+    })
+  }
+}
+
+async function persistSpecialControlTargetInBackground(
+  payload: Record<string, unknown>,
+  admin: AdminContext,
+  target: ResolvedControlTarget,
+  patch: ControlPatch,
+) {
+  try {
+    await persistMoneyDropSpecialControlTarget(payload, admin, target, patch, { publishAfter: false })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.error('Money Drop special control background persist failed:', message)
+    await publishControlTargets([target], patch, message).catch(err => {
+      console.error('Money Drop special control live error publish failed:', err)
+    })
+  }
 }
 
 function isMoneyDropSpecialLiveKey(formKey: string) {
@@ -261,6 +307,7 @@ async function persistMoneyDropSpecialControlTarget(
   admin: AdminContext,
   target: ResolvedControlTarget,
   patch: ControlPatch,
+  options: { publishAfter?: boolean } = {},
 ) {
   const formKey = moneyDropSpecialBaseFormKey(target.formKey)
   for (const roundIndex of target.rounds) {
@@ -282,6 +329,7 @@ async function persistMoneyDropSpecialControlTarget(
     } catch (error) {
       if (!isUnknownGasAction(error)) throw error
     }
+    if (options.publishAfter === false) continue
     const rounds = result.state?.rounds?.length
       ? result.state.rounds
       : target.rounds.map(index => ({ index, ...patch }))

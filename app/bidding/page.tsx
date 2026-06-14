@@ -780,10 +780,11 @@ function BiddingGame({ baan }: { baan:number }) {
   const betBalance = gs.showResults === true ? sheetFinalBalance : balance
   const betAfterBalance = gs.showResults === true ? sheetFinalBalance : balance - betSpend
   const canChooseKingDisaster = isKing || currentKing === baan
-  const canEditBid = gs.isOpen && !isBetMode && !isEventMode && !isSelectDisasterPhase
+  const isBidMode = !isBetMode && !isEventMode && !isSelectDisasterPhase
+  const canEditBid = gs.isOpen && isBidMode
   const canSelectKingDisaster = gs.isOpen && isSelectDisasterPhase && canChooseKingDisaster
   const canSeeCurrentOwnership = gs.showResults === true || canSelectKingDisaster
-  const canSeePreviousBidOwnership = canEditBid && gs.currentWave > 1
+  const canSeePreviousBidOwnership = isBidMode && gs.showResults !== true && gs.currentWave > 1
   const currentSheetOwnership = useWaveOwnership(gs.currentWave)
   const previousSheetOwnership = useWaveOwnership(bidContextWave)
   const visibleOwnershipSource = canSeeCurrentOwnership

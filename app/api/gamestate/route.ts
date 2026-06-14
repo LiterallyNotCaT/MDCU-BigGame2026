@@ -1,7 +1,8 @@
 import { createConnection, type Socket } from 'node:net'
 import { connect, type TLSSocket } from 'node:tls'
 import { createClient } from '@vercel/kv'
-import { NextResponse } from 'next/server'
+import { after, NextResponse } from 'next/server'
+import { callGas } from '@/lib/gas'
 import {
   DEFAULT_AMBASSADOR_VISIBILITY,
   DEFAULT_CHAT_PERMISSIONS,
@@ -189,6 +190,17 @@ async function writeGameState(state: GameState) {
   throw new Error('Missing KV_REST_API_URL/KV_REST_API_TOKEN or REDIS_URL')
 }
 
+async function syncAfternoonDisplayWave(wave: number) {
+  try {
+    await callGas({
+      action: 'writeAfternoonDisplayWave',
+      wave,
+    })
+  } catch (error) {
+    console.error('Afternoon display wave sync failed:', error)
+  }
+}
+
 export async function GET() {
   try {
     const state = await readGameState()
@@ -207,6 +219,7 @@ export async function POST(req: Request) {
   try {
     const state = normalizeGameState(await req.json())
     await writeGameState(state)
+    after(() => syncAfternoonDisplayWave(state.currentWave))
     return NextResponse.json({ success: true, state })
   } catch (error) {
     console.error('Game state POST failed:', error)

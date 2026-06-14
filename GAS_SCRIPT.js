@@ -8,6 +8,7 @@ const SHEET_ID = '1FKv1l9zpF85V_oUKQCjAjYyb4DZcMRCvN671DzU_Dq4'
 const STATE_SHEET = 'GAME_STATE'
 const CHAT_GID = 398958693
 const REPORT_CHAT_GID = 1090774629
+const AFTERNOON_SCORE_GID = 627098654
 const PASSWORD_GID = 1524637408
 const FORM_CONFIG_RANGE = 'E3:H40'
 const FORM_CONFIG_PUBLIC_CACHE_SECONDS = 60
@@ -123,6 +124,9 @@ function doPost(e) {
       output.setContent(JSON.stringify(result))
     } else if (payload.action === 'writeGameState') {
       const result = handleWriteGameState(payload.state || {})
+      output.setContent(JSON.stringify(result))
+    } else if (payload.action === 'writeAfternoonDisplayWave') {
+      const result = handleWriteAfternoonDisplayWave(payload)
       output.setContent(JSON.stringify(result))
     } else if (payload.action === 'readFormConfig') {
       const result = handleReadFormConfig()
@@ -1806,8 +1810,34 @@ function handleWriteGameState(state) {
     ['updatedAt', state.updatedAt || new Date().toISOString()],
   ]
   sheet.getRange(1, 1, rows.length, 2).setValues(rows)
+  writeAfternoonDisplayWave_(ss, wave)
   SpreadsheetApp.flush()
   return { status: 'ok', state: Object.fromEntries(rows) }
+}
+
+function writeAfternoonDisplayWave_(ss, wave) {
+  const waveNumber = Number(wave)
+  if (!waveNumber || waveNumber < 1 || waveNumber > 6) {
+    throw new Error('Invalid afternoon display wave')
+  }
+  const sheet = getSheetByGid_(ss, AFTERNOON_SCORE_GID)
+  if (!sheet) throw new Error(`Afternoon score sheet gid ${AFTERNOON_SCORE_GID} not found`)
+  sheet.getRange('L3').setValue(waveNumber)
+}
+
+function handleWriteAfternoonDisplayWave(payload) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID)
+    const wave = Number(payload.wave)
+    writeAfternoonDisplayWave_(ss, wave)
+    SpreadsheetApp.flush()
+    return { status: 'ok', wave }
+  } catch (err) {
+    return {
+      status: 'error',
+      message: String(err && err.message ? err.message : err),
+    }
+  }
 }
 
 // ── Write one house's wave data ────────────────────────────
