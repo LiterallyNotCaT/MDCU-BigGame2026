@@ -1385,6 +1385,7 @@ function moneyDropSpecialRoundState_(formKey, index, label, wave, value) {
     locked: blank ? false : roundControl.locked === true,
     deadlineAt: blank ? '' : String(roundControl.deadlineAt || ''),
   }
+  return result
 }
 
 function normalizeMoneyDropSpecialIslandList_(value) {
@@ -1634,18 +1635,21 @@ function isEventSolutionVisible_(wave) {
 }
 
 function rankEventAnswers_(sheet, config) {
-  const values = sheet.getRange(8, config.timeCol, 12, 1).getValues()
+  const range = sheet.getRange(8, config.timeCol, 12, 1)
+  const values = range.getValues()
+  const displayValues = range.getDisplayValues()
   const ranked = values
     .map((row, index) => ({
       baan: index + 1,
       time: eventTimeValue_(row[0]),
+      submittedAt: String(displayValues[index] && displayValues[index][0] || '').trim(),
     }))
     .filter(item => Number.isFinite(item.time))
     .sort((a, b) => a.time - b.time || a.baan - b.baan)
 
   const rankValues = Array.from({ length: 12 }, (_, index) => [ranked[index] ? ranked[index].baan : ''])
   sheet.getRange(8, config.rankCol, 12, 1).setValues(rankValues)
-  return ranked.map((item, index) => ({ rank: index + 1, baan: item.baan }))
+  return ranked.map((item, index) => ({ rank: index + 1, baan: item.baan, submittedAt: item.submittedAt, time: item.submittedAt }))
 }
 
 function readEventStatus_(wave, options) {
@@ -1655,15 +1659,21 @@ function readEventStatus_(wave, options) {
   const sheet = openEventSheet_()
   const rankRows = sheet.getRange(8, config.rankCol, 12, 1).getDisplayValues()
   const timeRows = sheet.getRange(8, config.timeCol, 12, 1).getDisplayValues()
+  const submitted = timeRows
+    .map((row, index) => ({ baan: index + 1, time: String(row[0] || '').trim(), submittedAt: String(row[0] || '').trim() }))
+    .filter(item => item.time)
+  const submittedByBaan = submitted.reduce((map, item) => {
+    map[item.baan] = item.time
+    return map
+  }, {})
   const results = rankRows
     .map((row, index) => ({
       rank: index + 1,
       baan: Number(row[0]),
+      submittedAt: submittedByBaan[Number(row[0])] || '',
+      time: submittedByBaan[Number(row[0])] || '',
     }))
     .filter(item => Number.isInteger(item.baan) && item.baan >= 1 && item.baan <= 12)
-  const submitted = timeRows
-    .map((row, index) => ({ baan: index + 1, time: String(row[0] || '').trim() }))
-    .filter(item => item.time)
   const questionImage = eventImageUrlFromRange_(sheet.getRange(21, config.answerCol))
   const solutionVisible = isEventSolutionVisible_(config.wave)
   const solutionImage = includeSolutionImage && solutionVisible

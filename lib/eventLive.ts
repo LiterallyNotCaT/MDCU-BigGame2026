@@ -4,6 +4,8 @@ export type EventRank = {
   rank: number
   baan: number
   saving?: boolean
+  submittedAt?: string
+  time?: string
 }
 
 export type EventSafeStatus = {
@@ -12,7 +14,7 @@ export type EventSafeStatus = {
   questionReady?: boolean
   solutionVisible?: boolean
   results?: EventRank[]
-  submitted?: Array<{ baan: number; time?: string }>
+  submitted?: Array<{ baan: number; time?: string; submittedAt?: string }>
   message?: string
   [key: string]: unknown
 }
@@ -98,6 +100,8 @@ function normalizeRankList(value: unknown): EventRank[] {
       rank: Number.isFinite(rankNumber) && rankNumber > 0 ? Math.floor(rankNumber) : index + 1,
       baan,
       saving: raw.saving === true,
+      submittedAt: typeof raw.submittedAt === 'string' ? raw.submittedAt : typeof raw.time === 'string' ? raw.time : '',
+      time: typeof raw.time === 'string' ? raw.time : typeof raw.submittedAt === 'string' ? raw.submittedAt : '',
     })
   })
   return ranks.sort((a, b) => a.rank - b.rank || a.baan - b.baan)
@@ -215,7 +219,7 @@ function mergePendingResults(sheetResults: EventRank[], pending: EventPendingAns
     })
     .forEach(item => {
       seen.add(item.baan)
-      next.push({ rank: next.length + 1, baan: item.baan, saving: true })
+      next.push({ rank: next.length + 1, baan: item.baan, saving: true, submittedAt: item.submittedAt, time: item.submittedAt })
     })
   return next
 }

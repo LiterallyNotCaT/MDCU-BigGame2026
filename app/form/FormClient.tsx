@@ -77,6 +77,9 @@ const FORM_SESSION_STORAGE_KEY = 'biggame_form_sessions_v1'
 const FORM_LIVE_CLIENT_MAX_AGE_MS = 2 * 60 * 1000
 const FORM_FETCH_TIMEOUT_MS = 75_000
 const FORM_CONFIRMED_HOLD_MS = 25_000
+const FORM_LIVE_IDLE_POLL_MS = 3000
+const FORM_LIVE_SENDING_POLL_MS = 800
+const FORM_LIVE_HIDDEN_POLL_MS = 12000
 
 function isFreshLiveRound(round: FormLiveState['rounds'][string] | undefined) {
   if (!round?.updatedAt) return false
@@ -100,6 +103,50 @@ function normalizeMoneyDropSpecialGroupText(value: string) {
     .map(item => item.trim())
     .filter(item => /^[ABC]$/.test(item))
   return Array.from(new Set(groups)).join(', ')
+}
+
+function normalizeMoneyDropSpecialIslandText(value: string) {
+  const areas = value
+    .toUpperCase()
+    .match(/[ABC]\s*[1-9]/g)
+    ?.map(item => item.replace(/\s+/g, '')) ?? []
+  return Array.from(new Set(areas)).join(', ')
+}
+
+function fallbackMoneyDropSpecialRound(index: number): MoneyDropSpecialRound {
+  return {
+    index,
+    label: index === 0 ? 'Wave 2' : 'Wave 4',
+    wave: index === 0 ? 2 : 4,
+    value: '',
+    confirmed: false,
+    locked: false,
+    saving: false,
+    error: '',
+  }
+}
+
+function normalizeMoneyDropSpecialState(state: MoneyDropSpecialState): MoneyDropSpecialState {
+  const rawRounds = Array.isArray(state.rounds) ? state.rounds : []
+  return {
+    ...state,
+    rounds: [0, 1].map(index => {
+      const rawRound = rawRounds[index]
+      const fallback = fallbackMoneyDropSpecialRound(index)
+      if (!rawRound || typeof rawRound !== 'object') return fallback
+      return {
+        ...fallback,
+        ...rawRound,
+        index,
+        wave: rawRound.wave === 4 ? 4 : fallback.wave,
+        value: String(rawRound.value || ''),
+        confirmed: rawRound.confirmed === true,
+        locked: rawRound.locked === true,
+        saving: rawRound.saving === true,
+        error: String(rawRound.error || ''),
+      }
+    }),
+  }
 }
 
 function isBlankFormColumn(state: ScoringFormState, roundIndex: number) {
@@ -1084,7 +1131,14 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     let timer: number | undefined
 
     const schedule = () => {
-      if (!stopped) timer = window.setTimeout(sync, 500)
+      if (stopped) return
+      const hasActiveSubmit = (submittingRoundsByForm.current[liveFormKey]?.size ?? 0) > 0
+      const delay = document.hidden
+        ? FORM_LIVE_HIDDEN_POLL_MS
+        : hasActiveSubmit
+          ? FORM_LIVE_SENDING_POLL_MS
+          : FORM_LIVE_IDLE_POLL_MS
+      timer = window.setTimeout(sync, delay)
     }
 
     const sync = async () => {
@@ -1267,7 +1321,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
   }
 
   const applyMoneyDropSpecialState = useCallback((incomingState: MoneyDropSpecialState) => {
-    const nextState = mergeMoneyDropSpecialWithLocalDraft(incomingState)
+    const nextState = mergeMoneyDropSpecialWithLocalDraft(normalizeMoneyDropSpecialState(incomingState))
     const nextDraft = nextState.rounds.reduce<string[]>((draftValues, round) => {
       draftValues[round.index] = round.value || ''
       return draftValues
@@ -1332,7 +1386,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     }
     const rawValue = moneyDropSpecialDraft[roundIndex] ?? ''
     const value = roundIndex === 0
-      ? (rawValue.toUpperCase().match(/[ABC]\s*[1-9]/g)?.map(item => item.replace(/\s+/g, '')) ?? []).filter((item, index, arr) => arr.indexOf(item) === index).join(', ')
+      ? normalizeMoneyDropSpecialIslandText(rawValue)
       : normalizeMoneyDropSpecialGroupText(rawValue)
     if (!value) {
       notify('err', roundIndex === 0 ? 'Please enter island names like A2, B3, C9.' : 'Please enter A, B, C, or multiple groups like A, B.')
@@ -1769,7 +1823,14 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     let timer: number | undefined
 
     const schedule = () => {
-      if (!stopped) timer = window.setTimeout(sync, 700)
+      if (stopped) return
+      const hasActiveSubmit = (submittingMoneyDropRoundsByLiveKey.current[liveKey]?.size ?? 0) > 0
+      const delay = document.hidden
+        ? FORM_LIVE_HIDDEN_POLL_MS
+        : hasActiveSubmit
+          ? FORM_LIVE_SENDING_POLL_MS
+          : FORM_LIVE_IDLE_POLL_MS
+      timer = window.setTimeout(sync, delay)
     }
 
     const sync = async () => {
@@ -1809,11 +1870,16 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     ? currentState.rankLabels.slice(0, currentState.form.rankCount || currentState.rankLabels.length)
     : []
   const visibleRounds = currentState
-    ? currentState.rounds.slice(0, currentState.form.maxRounds || currentState.rounds.length)
+    ? currentState.rounds.slice(0, currentState.form.maxRounds || currentState.rounds.length).filter(Boolean)
     : []
   const isScoreNumberForm = currentState?.form.kind === 'score-number'
   const isScoreInputForm = currentState?.form.kind === 'score-number' || currentState?.form.kind === 'score-unsigned'
   const isMoneyDropForm = currentState?.form.user.toLowerCase().replace(/\s+/g, ' ').trim() === 'money drop'
+  const moneyDropSpecialRounds = normalizeMoneyDropSpecialState(moneyDropSpecial ?? {
+    formKey: currentState?.form.formKey ?? '',
+    liveKey: '',
+    rounds: [],
+  }).rounds
   const usesAutoRemainder = currentState?.form.usesAutoRemainder === true
   const showAutoControls = Boolean(currentState && usesAutoRemainder)
   const effectiveSelectedAutoRow = usesAutoRemainder ? selectedAutoRow : -1
@@ -2146,10 +2212,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
                         <thead>
                           <tr>
                             <th>-</th>
-                            {(moneyDropSpecial?.rounds ?? [
-                              { index: 0, label: 'Wave 2', wave: 2, value: '', confirmed: false, locked: false },
-                              { index: 1, label: 'Wave 4', wave: 4, value: '', confirmed: false, locked: false },
-                            ]).map(round => (
+                            {moneyDropSpecialRounds.map(round => (
                               <th key={round.index}>
                                 <div className="moneydrop-special-head-cell">
                                   <span>{round.label}</span>
@@ -2172,20 +2235,30 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
                       <tbody>
                           <tr>
                             <th>Input</th>
-                            {(moneyDropSpecial?.rounds ?? []).map(round => {
+                            {moneyDropSpecialRounds.map(round => {
                               const isSending = moneyDropSpecialSaving.has(round.index) || round.saving === true
                               const editable = Boolean(session && canEditCurrentForm && (isAdmin || (!round.confirmed && !round.locked && !isSending)))
                               return (
                                 <td key={round.index}>
-                                  <input
-                                    value={moneyDropSpecialDraft[round.index] ?? ''}
-                                    onChange={event => updateMoneyDropSpecialDraft(round.index, event.target.value)}
-                                    onBlur={event => updateMoneyDropSpecialDraft(round.index, round.index === 0
-                                      ? (event.target.value.toUpperCase().match(/[ABC]\s*[1-9]/g)?.map(item => item.replace(/\s+/g, '')) ?? []).filter((item, index, arr) => arr.indexOf(item) === index).join(', ')
-                                      : normalizeMoneyDropSpecialGroupText(event.target.value))}
-                                    disabled={!editable}
-                                    placeholder={round.index === 0 ? 'A2, B3, C9' : 'A, B, C'}
-                                  />
+                                  {round.index === 0 ? (
+                                    <textarea
+                                      className="moneydrop-special-islands-input"
+                                      value={moneyDropSpecialDraft[round.index] ?? ''}
+                                      onChange={event => updateMoneyDropSpecialDraft(round.index, event.target.value)}
+                                      onBlur={event => updateMoneyDropSpecialDraft(round.index, normalizeMoneyDropSpecialIslandText(event.target.value))}
+                                      disabled={!editable}
+                                      placeholder="A1, A2, B4, C5"
+                                      rows={2}
+                                    />
+                                  ) : (
+                                    <input
+                                      value={moneyDropSpecialDraft[round.index] ?? ''}
+                                      onChange={event => updateMoneyDropSpecialDraft(round.index, event.target.value)}
+                                      onBlur={event => updateMoneyDropSpecialDraft(round.index, normalizeMoneyDropSpecialGroupText(event.target.value))}
+                                      disabled={!editable}
+                                      placeholder="A, B, C"
+                                    />
+                                  )}
                                   {round.error && <div className="form-round-error">{round.error}</div>}
                                 </td>
                               )
@@ -2195,7 +2268,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
                         <tfoot>
                           <tr>
                             <th>Confirm</th>
-                            {(moneyDropSpecial?.rounds ?? []).map(round => {
+                            {moneyDropSpecialRounds.map(round => {
                               const isSending = moneyDropSpecialSaving.has(round.index) || round.saving === true
                               const disabled = isSending || !canEditCurrentForm || (!isAdmin && (round.confirmed || round.locked))
                               return (

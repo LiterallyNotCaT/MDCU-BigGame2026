@@ -262,12 +262,32 @@ function sameWaveInputRow(a: WaveInputRow | null, b: WaveInputRow | null) {
   return JSON.stringify(a) === JSON.stringify(b)
 }
 
-type EventRank = { rank: number; baan: number; saving?: boolean }
+type EventRank = { rank: number; baan: number; saving?: boolean; submittedAt?: string; time?: string }
 type EventStatus = {
   wave: number
   questionReady?: boolean
   solutionVisible?: boolean
   results?: EventRank[]
+  submitted?: Array<{ baan: number; time?: string; submittedAt?: string }>
+}
+
+function eventRankTime(item: Pick<EventRank, 'submittedAt' | 'time'> | { submittedAt?: string; time?: string }) {
+  return String(item.submittedAt || item.time || '').trim()
+}
+
+function withEventSubmittedTimes(
+  results: EventRank[],
+  submitted: Array<{ baan: number; time?: string; submittedAt?: string }> = [],
+) {
+  const submittedByBaan = new Map(
+    submitted
+      .map(item => [Number(item.baan), eventRankTime(item)] as const)
+      .filter(([baan, time]) => Number.isInteger(baan) && Boolean(time)),
+  )
+  return results.map(item => ({
+    ...item,
+    submittedAt: eventRankTime(item) || submittedByBaan.get(item.baan) || '',
+  }))
 }
 
 function EventGamePanel({ baan, wave, isOpen, showSolution }: { baan: number; wave: number; isOpen: boolean; showSolution: boolean }) {
@@ -288,11 +308,13 @@ function EventGamePanel({ baan, wave, isOpen, showSolution }: { baan: number; wa
       const current = currentEventRef.current
       if (current.wave !== wave) return
       if (res.ok && data.status !== 'error') {
+        const submitted = Array.isArray(data.submitted) ? data.submitted : []
         const safeData: EventStatus = {
           wave: Number(data.wave),
           questionReady: data.questionReady === true,
           solutionVisible: current.showSolution && data.solutionVisible === true,
-          results: Array.isArray(data.results) ? data.results : [],
+          results: withEventSubmittedTimes(Array.isArray(data.results) ? data.results : [], submitted),
+          submitted,
         }
         setStatus(safeData)
       }
@@ -330,7 +352,7 @@ function EventGamePanel({ baan, wave, isOpen, showSolution }: { baan: number; wa
   useEffect(() => {
     if (!/saving/i.test(message)) return
     if (ownResult && !ownResult.saving) {
-      setMessage(`Correct! Rank ${ownResult.rank}`)
+      setMessage('Correct!')
       return
     }
     if (status && !ownResult && !submitting) setMessage('')
@@ -361,10 +383,11 @@ function EventGamePanel({ baan, wave, isOpen, showSolution }: { baan: number; wa
             wave,
             questionReady: prev?.questionReady,
             solutionVisible: prev?.solutionVisible,
-            results: data.results,
+            submitted: prev?.submitted,
+            results: withEventSubmittedTimes(data.results, prev?.submitted ?? []),
           }))
         }
-        setMessage(`Correct! Rank ${data.rank ?? '-'}`)
+        setMessage('Correct!')
         setAnswer('')
         void refreshStatus()
       } else {
@@ -412,7 +435,7 @@ function EventGamePanel({ baan, wave, isOpen, showSolution }: { baan: number; wa
           onChange={event => setAnswer(event.target.value)}
           disabled={!isOpen || submitting || Boolean(ownRank)}
           className="input-base event-answer-input"
-          placeholder={ownRank ? `Already correct: rank ${ownRank}` : isOpen ? 'Type answer' : 'Waiting for admin to open'}
+          placeholder={ownRank ? 'Already correct' : isOpen ? 'Type answer' : 'Waiting for admin to open'}
         />
         <button type="submit" disabled={!canSubmit} className="btn btn-primary event-answer-button">
           {submitting ? 'Checking...' : 'submit&check'}
@@ -440,10 +463,13 @@ function EventGamePanel({ baan, wave, isOpen, showSolution }: { baan: number; wa
             )}
           >
             <span className="event-rank-number">{item.rank}</span>
-            <strong>
-              {HOUSE_NAMES[item.baan]}
-              {item.saving && item.baan !== baan && <span className="ml-1 text-[10px] font-bold text-blue-600">Saving...</span>}
-            </strong>
+            <span className="event-rank-body">
+              <strong>
+                {HOUSE_NAMES[item.baan]}
+                {item.saving && item.baan !== baan && <span className="ml-1 text-[10px] font-bold text-blue-600">Saving...</span>}
+              </strong>
+              {!item.saving && eventRankTime(item) && <span className="event-rank-time">{eventRankTime(item)}</span>}
+            </span>
           </div>
         )) : (
           <div className="event-rank-empty">No correct answers yet.</div>

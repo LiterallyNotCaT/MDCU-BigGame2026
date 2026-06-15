@@ -63,7 +63,48 @@ function normalizeValue(roundIndex: number, value: unknown) {
   return roundIndex === 0 ? normalizeIslandList(value) : normalizeGroup(value)
 }
 
+function fallbackSpecialRound(index: number): MoneyDropSpecialRound {
+  return {
+    index,
+    label: index === 0 ? 'Wave 2' : 'Wave 4',
+    wave: index === 0 ? 2 : 4,
+    value: '',
+    confirmed: false,
+    locked: false,
+    saving: false,
+    error: '',
+    deadlineAt: '',
+  }
+}
+
+function normalizeSpecialState(state: MoneyDropSpecialState | null | undefined, formKey: string): MoneyDropSpecialState {
+  const rawRounds = Array.isArray(state?.rounds) ? state.rounds : []
+  const rounds = [0, 1].map(index => {
+    const rawRound = rawRounds[index]
+    const fallback = fallbackSpecialRound(index)
+    if (!rawRound || typeof rawRound !== 'object') return fallback
+    const item = rawRound as Partial<MoneyDropSpecialRound>
+    return {
+      ...fallback,
+      label: String(item.label || fallback.label),
+      wave: item.wave === 4 ? 4 : fallback.wave,
+      value: String(item.value || ''),
+      confirmed: item.confirmed === true,
+      locked: item.locked === true,
+      saving: item.saving === true,
+      error: String(item.error || ''),
+      deadlineAt: String(item.deadlineAt || ''),
+    }
+  })
+  return {
+    formKey: String(state?.formKey || formKey),
+    liveKey: String(state?.liveKey || specialLiveKey(formKey)),
+    rounds,
+  }
+}
+
 async function mergeLive(state: MoneyDropSpecialState) {
+  state = normalizeSpecialState(state, state.formKey)
   const sheetState = {
     ...state,
     rounds: state.rounds.map(round => ({

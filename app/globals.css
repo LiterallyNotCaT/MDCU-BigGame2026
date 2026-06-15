@@ -2169,6 +2169,22 @@ form .btn.w-full {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.event-rank-body {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.event-rank-time {
+  min-width: 0;
+  overflow: hidden;
+  color: #111827;
+  font-size: 0.68rem;
+  font-weight: 750;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .event-rank-empty {
   border: 1px dashed #c7d7ee;
   border-radius: 12px;
@@ -4749,6 +4765,28 @@ form .btn.w-full {
   border-radius: 8px;
   font-size: 0.68rem;
 }
+.moneydrop-special-table textarea {
+  width: 100%;
+  min-height: 48px;
+  resize: vertical;
+  border: 1px solid #cfe0f4;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #0f172a;
+  padding: 8px 10px;
+  font-size: 0.86rem;
+  font-weight: 800;
+  line-height: 1.28;
+  outline: none;
+}
+.moneydrop-special-table textarea:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37,99,235,0.14);
+}
+.moneydrop-special-table textarea:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
 @media (max-width: 640px) {
   .moneydrop-special-card {
     padding: 9px;
@@ -4824,6 +4862,12 @@ form .btn.w-full {
     height: 36px;
     padding: 7px 8px;
     font-size: 0.78rem;
+  }
+
+  .moneydrop-special-table textarea {
+    min-height: 54px;
+    padding: 7px 8px;
+    font-size: 0.76rem;
   }
 
   .moneydrop-special-table .form-confirm-btn {
@@ -5331,6 +5375,12 @@ form .btn.w-full {
     font-size: 0.72rem;
   }
 
+  .form-score-table.moneydrop-special-table textarea {
+    min-height: 52px;
+    padding: 6px 7px;
+    font-size: 0.72rem;
+  }
+
   .form-score-table.moneydrop-special-table .form-confirm-btn {
     min-height: 32px;
     padding: 6px 4px;
@@ -5397,6 +5447,12 @@ form .btn.w-full {
 
   .form-score-table.moneydrop-special-table input {
     padding-inline: 6px !important;
+    font-size: 0.68rem !important;
+  }
+
+  .form-score-table.moneydrop-special-table textarea {
+    min-height: 50px;
+    padding: 6px !important;
     font-size: 0.68rem !important;
   }
 
