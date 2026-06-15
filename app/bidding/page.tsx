@@ -822,14 +822,27 @@ function BiddingGame({ baan }: { baan:number }) {
       ? bidContextMeta.king
       : null
   const hasBetSheetInput = Boolean(sheetInput?.hasBetInput)
+  const normalizedBetTarget = normalizeSheetBetTarget(betTarget)
+  const sheetBetMatchesCurrent = Boolean(
+    hasBetSheetInput
+      && normalizedBetTarget
+      && normalizeSheetBetTarget(sheetInput?.betTarget ?? '') === normalizedBetTarget
+      && Number(sheetInput?.betAmount ?? 0) === betSpend,
+  )
   const hasFreshLocalBetInput = Boolean(
     savedAt
       && currentSubmission?.betTarget
       && currentSubmission?.betAmount
       && canUseLocalSubmittedData,
   )
+  const freshLocalBetMatchesCurrent = Boolean(
+    hasFreshLocalBetInput
+      && normalizedBetTarget
+      && String(currentSubmission?.betTarget ?? '') === normalizedBetTarget
+      && Number(currentSubmission?.betAmount ?? 0) === betSpend,
+  )
   const hasExistingBetInput = hasBetSheetInput || hasFreshLocalBetInput
-  const isBetSubmitSaved = isBetMode && isSaved && hasExistingBetInput
+  const isBetSubmitSaved = isBetMode && isSaved && (sheetBetMatchesCurrent || freshLocalBetMatchesCurrent)
   const isBetSubmitDisabled = !gs.isOpen || isSyncing || !betTarget || !isBetAmountValid || isBetSubmitSaved
   const betSubmitVerb = hasExistingBetInput ? 'Resubmit' : 'Submit'
 
@@ -1294,7 +1307,7 @@ function BiddingGame({ baan }: { baan:number }) {
       setIsSaved(true)
       setSavedAt(timestamp)
       lastSuccessfulSaveAt.current = Date.now()
-      if (!res.queued) clearBiddingDraft(draftKey)
+      clearBiddingDraft(draftKey)
       setTimeout(() => {
         void fetchBalance()
         void fetchSheetSnapshot()

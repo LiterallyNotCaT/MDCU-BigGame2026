@@ -892,6 +892,8 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
         if (selectedState) {
           applyFormState(selectedState)
           if (options?.force === true) sheetFreshLoadedForms.current.add(nextFormKey)
+        } else {
+          setStateLoadError('Table is not loaded.')
         }
         return
       }
@@ -904,6 +906,8 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
         if (selectedState) {
           applyFormState(selectedState)
           if (options?.force === true) sheetFreshLoadedForms.current.add(nextFormKey)
+        } else {
+          setStateLoadError('Table is not loaded.')
         }
         return
       }
@@ -930,6 +934,12 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
       if (stateUiLoadSeq.current === uiLoadSeq) setLoadingState(false)
     }
   }, [adminSession, applyFormState, formKey, forms, loadStatesForTab, oauthProfile])
+
+  useEffect(() => {
+    if (!formKey || !canLoadSelectedForm || currentState?.form.formKey === formKey) return
+    const cachedState = statesByFormKey[formKey] ?? statesByFormKeyRef.current[formKey]
+    if (cachedState) applyFormState(cachedState)
+  }, [applyFormState, canLoadSelectedForm, currentState?.form.formKey, formKey, statesByFormKey])
 
   const selectFormKey = useCallback((nextFormKey: string) => {
     if (nextFormKey && nextFormKey !== formKey) {
@@ -1860,7 +1870,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
                 <FileSpreadsheet size={26} />
                 <div>{currentForm.user} is left blank for now.</div>
               </div>
-            ) : (loadingState || (canLoadSelectedForm && !currentState && !stateLoadError)) && !currentState ? (
+            ) : loadingState && !currentState ? (
               <div className="form-empty-state">Loading table...</div>
             ) : !currentState ? (
               <div className="form-empty-state">
