@@ -1504,11 +1504,9 @@ function BiddingGame({ baan }: { baan:number }) {
                 {gs.isOpen?'OPEN':'CLOSED'}
               </div>
             </div>
-            {!isEventMode && (
-              <div className="ml-auto">
-                <GroupChat actor={baan} />
-              </div>
-            )}
+            <div className="ml-auto">
+              <GroupChat actor={baan} />
+            </div>
             <button onClick={()=>{sessionStorage.removeItem('baan_login');sessionStorage.removeItem('baan_login_token');window.location.reload()}}
               className={clsx('btn btn-ghost', isEventMode && 'wire-edge-logout')}>
               <LogOut size={14} /> Logout

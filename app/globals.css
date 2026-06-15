@@ -3942,11 +3942,27 @@ form .btn.w-full {
 .group-chat-message-meta {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
   padding: 0 4px;
   font-size: 0.68rem;
   font-weight: 800;
   color: #64748b;
+}
+.group-chat-house-label {
+  display: inline-flex;
+  min-width: 46px;
+  max-width: 82px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(15, 23, 42, 0.28);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 0.68rem;
+  font-weight: 900;
+  line-height: 1.05;
+  white-space: nowrap;
+  box-shadow: inset 0 -1px 0 rgba(15, 23, 42, 0.12), 0 1px 3px rgba(15, 23, 42, 0.08);
 }
 .group-chat-reply-context {
   max-width: 100%;

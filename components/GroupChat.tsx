@@ -3,7 +3,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import clsx from 'clsx'
 import { MessageCircle, RefreshCw, Send, X } from 'lucide-react'
-import { HOUSE_COLORS, HOUSE_NAMES, normalizeChatPermissions, type ChatPermissions } from '@/lib/constants'
+import { HOUSE_COLORS, HOUSE_NAMES, HOUSE_TEXT_COLORS, normalizeChatPermissions, type ChatPermissions } from '@/lib/constants'
 import {
   type GroupChatActor,
   type GroupChatMessage,
@@ -149,6 +149,12 @@ function messageSenderName(message: GroupChatMessage) {
   if (isAdminSender(message)) return 'Admin'
   if (message.baan) return HOUSE_NAMES[message.baan]
   return message.sender || 'Unknown'
+}
+
+function messageHouseNumber(message: GroupChatMessage) {
+  if (message.baan && HOUSE_COLORS[message.baan]) return message.baan
+  const baan = Number(String(message.sender || '').trim())
+  return Number.isInteger(baan) && HOUSE_COLORS[baan] ? baan : null
 }
 
 function isAdminSender(message: GroupChatMessage) {
@@ -593,7 +599,9 @@ export default function GroupChat({
               {visibleMessages.map((message, index) => {
                 const isMine = isSameActor(message, actor)
                 const isAdmin = isAdminSender(message)
-                const color = isAdmin ? '#111827' : message.baan ? HOUSE_COLORS[message.baan] : '#64748b'
+                const houseNumber = messageHouseNumber(message)
+                const color = isAdmin ? '#111827' : houseNumber ? HOUSE_COLORS[houseNumber] : '#64748b'
+                const textColor = isAdmin ? '#ffffff' : houseNumber ? HOUSE_TEXT_COLORS[houseNumber] : '#ffffff'
                 const senderName = messageSenderName(message)
                 const replySource = message.replyToId ? messageByChatId.get(message.replyToId) : null
                 const dateKey = message.dateKey || 'unknown-date'
@@ -606,7 +614,16 @@ export default function GroupChat({
                     )}
                     <div className={clsx('group-chat-message-row', isMine && 'is-mine')}>
                       <div className="group-chat-message-meta">
-                        <span style={{ color }}>{senderName}</span>
+                        {houseNumber ? (
+                          <span
+                            className="group-chat-house-label"
+                            style={{ background: color, color: textColor }}
+                          >
+                            {senderName}
+                          </span>
+                        ) : (
+                          <span style={{ color }}>{senderName}</span>
+                        )}
                         <span>sent to {targetLabel(message.sendTo)}</span>
                       </div>
                       {message.replyToId && (
@@ -620,7 +637,7 @@ export default function GroupChat({
                         </div>
                       )}
                       <div className="group-chat-bubble-line">
-                        <div className={clsx('group-chat-bubble', isMine && 'is-mine')} style={isMine ? { background: color } : undefined}>
+                        <div className={clsx('group-chat-bubble', isMine && 'is-mine')} style={isMine ? { background: color, color: textColor } : undefined}>
                           {message.message}
                         </div>
                         <span className="group-chat-message-actions">
