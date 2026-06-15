@@ -21,6 +21,9 @@ type GasWriteResponse = {
 }
 
 const SHEET_WRITE_RETRY_DELAYS_MS = [700, 900, 1600, 3000]
+const writeQueues = (globalThis as typeof globalThis & {
+  __biddingWriteQueues?: Map<string, Promise<void>>
+}).__biddingWriteQueues ??= new Map<string, Promise<void>>()
 
 function jsonError(message: string, status = 500) {
   return NextResponse.json({ ok: false, message }, { status })
@@ -54,6 +57,23 @@ function shouldRetryGasWrite(message: string) {
 
 function newClientId() {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+function writeQueueKey(payload: WritePayload, mode: BiddingWriteMode) {
+  return `${payload.wave}:${payload.baan}:${mode}`
+}
+
+function queuePersistWriteWave(payload: WritePayload, mode: BiddingWriteMode) {
+  const key = writeQueueKey(payload, mode)
+  const previous = writeQueues.get(key) ?? Promise.resolve()
+  const next = previous
+    .catch(() => undefined)
+    .then(() => persistWriteWave(payload, mode))
+    .finally(() => {
+      if (writeQueues.get(key) === next) writeQueues.delete(key)
+    })
+  writeQueues.set(key, next)
+  return next
 }
 
 async function persistWriteWave(payload: WritePayload, mode: BiddingWriteMode) {
@@ -111,7 +131,7 @@ export async function POST(req: Request) {
     const clientId = String((payload as { clientId?: unknown }).clientId || newClientId()).trim()
     const writePayload: WritePayload = { ...payload, clientId }
     await publishBiddingPendingWrite(writePayload, mode, clientId)
-    after(() => persistWriteWave(writePayload, mode))
+    after(() => queuePersistWriteWave(writePayload, mode))
 
     return NextResponse.json({
       ok: true,

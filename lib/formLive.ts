@@ -1,4 +1,4 @@
-import type { ScoringFormState } from '@/lib/forms'
+import { normalizeScoringFormState, type ScoringFormState } from '@/lib/forms'
 import { redisDeleteKey, redisGetJson, redisSetJsonWithTtl, redisSetJsonIfNotExists } from '@/lib/redisStore'
 
 export type FormLiveRound = {
@@ -218,6 +218,7 @@ export async function releaseFormRoundSubmitClaim(formKey: string, roundIndex: n
 
 export async function mergeFormLiveIntoState(state: ScoringFormState | null | undefined) {
   if (!state?.form?.formKey) return state
+  state = normalizeScoringFormState(state)
   let live = await readFormLiveState(state.form.formKey)
   if (!live.version) {
     await seedFormLiveState(state)
@@ -291,6 +292,7 @@ export async function mergeFormLiveIntoState(state: ScoringFormState | null | un
 
 export async function seedFormLiveState(state: ScoringFormState | null | undefined) {
   if (!state?.form?.formKey) return
+  state = normalizeScoringFormState(state)
   const existing = await readFormLiveState(state.form.formKey)
   if (existing.version > 0) return
 
@@ -357,6 +359,7 @@ function isStateColumnBlank(state: ScoringFormState, roundIndex: number) {
 
 export async function publishFullFormState(state: ScoringFormState | null | undefined, options?: { authoritative?: boolean }) {
   if (!state?.form?.formKey) return
+  state = normalizeScoringFormState(state)
   const existing = await readFormLiveState(state.form.formKey)
   const releaseClaims: number[] = []
   const patches = state.rounds.flatMap((round, index) => {

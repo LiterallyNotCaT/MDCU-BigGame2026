@@ -504,7 +504,7 @@ function handleAuthAccess(payload) {
 }
 
 function formConfigCacheKey_(includePasswords) {
-  return `FORM_CONFIG_V14_${includePasswords ? 'private' : 'public'}`
+  return `FORM_CONFIG_V15_${includePasswords ? 'private' : 'public'}`
 }
 
 function formAdminPasswordCacheKey_() {
@@ -551,7 +551,7 @@ function inferFormMeta_(tab, user) {
   if (normalized.indexOf('stacking block') >= 0 || normalized.indexOf('escape') >= 0) {
     const meta = normalized.indexOf('escape') >= 0
       ? { kind: 'ranking-single', defaultFillToRank: 6, allowTies: false, blank: false, rankCount: 7, maxRounds: 2, usesAutoRemainder: true, autoAfterHouseCount: 6 }
-      : { kind: 'ranking-single', defaultFillToRank: 4, allowTies: false, blank: false, rankCount: 4, maxRounds: 6, usesAutoRemainder: false, autoAfterHouseCount: 0 }
+      : { kind: 'ranking-single', defaultFillToRank: 4, allowTies: true, blank: false, rankCount: 4, maxRounds: 6, usesAutoRemainder: false, autoAfterHouseCount: 0 }
     return capAfternoonMiniGameRounds_(tab, normalized, meta)
   }
   if (isAfternoonGamesTab_(tab)) {

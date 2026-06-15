@@ -44,7 +44,10 @@ export async function POST(req: Request) {
       if (payload.force === true) {
         await Promise.all(Object.values(visibleStates).map(state => publishFullFormState(state)))
       }
-      const states = await mergeFormLiveIntoStates(visibleStates)
+      const mergedStates = await mergeFormLiveIntoStates(visibleStates)
+      const states = Object.fromEntries(
+        Object.entries(mergedStates).map(([key, state]) => [key, normalizeScoringFormState(state)] as const),
+      )
       return NextResponse.json({ ok: true, states, errors: data.errors ?? {} })
     }
 
@@ -64,7 +67,10 @@ export async function POST(req: Request) {
     const normalizedStates = Object.fromEntries(
       Object.entries(data.states ?? {}).map(([key, state]) => [key, normalizeScoringFormState(state)] as const),
     )
-    const states = await mergeFormLiveIntoStates(normalizedStates)
+    const mergedStates = await mergeFormLiveIntoStates(normalizedStates)
+    const states = Object.fromEntries(
+      Object.entries(mergedStates).map(([key, state]) => [key, normalizeScoringFormState(state)] as const),
+    )
     return NextResponse.json({ ok: true, states, errors: data.errors ?? {} })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

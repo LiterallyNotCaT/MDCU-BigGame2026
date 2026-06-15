@@ -16,6 +16,7 @@ import {
 } from '@/lib/formPermissions'
 import {
   formatHouseList,
+  normalizeScoringFormState,
   normalizeHouseText,
   parseHouseList,
   remainingHouseText,
@@ -350,7 +351,10 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
   const grouped = useMemo(() => groupByTab(forms), [forms])
   const currentForms = grouped[tab] ?? []
   const currentForm = forms.find(form => form.formKey === formKey) ?? currentForms[0] ?? null
-  const currentState = currentForm && state?.form.formKey === currentForm.formKey ? state : null
+  const currentState = useMemo(() => {
+    const matchingState = currentForm && state?.form.formKey === currentForm.formKey ? state : null
+    return matchingState ? normalizeScoringFormState(matchingState) : null
+  }, [currentForm, state])
   const oauthIsAdmin = isOAuthAdmin(oauthProfile)
   const oauthCanViewCurrent = canOAuthViewForm(oauthProfile, currentForm)
   const oauthCanEditCurrent = canOAuthEditForm(oauthProfile, currentForm)
@@ -472,6 +476,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
   }
 
   const mergeFormStateWithLocalDraft = useCallback((incoming: ScoringFormState) => {
+    incoming = normalizeScoringFormState(incoming)
     const formKey = incoming.form.formKey
     const protectedRounds = protectedRoundsForForm(formKey)
     const recentConfirmedRounds = new Set<number>()

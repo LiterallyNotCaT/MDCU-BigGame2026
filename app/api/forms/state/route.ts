@@ -25,7 +25,8 @@ export async function POST(req: Request) {
     if (payload.force === true) {
       await publishFullFormState(normalizedState)
     }
-    const state = await mergeFormLiveIntoState(normalizedState)
+    const mergedState = await mergeFormLiveIntoState(normalizedState)
+    const state = mergedState ? normalizeScoringFormState(mergedState) : mergedState
     return NextResponse.json({ ok: true, state })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
