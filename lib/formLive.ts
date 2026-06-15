@@ -34,6 +34,7 @@ const FORM_SUBMIT_CLAIM_TTL_SECONDS = 75
 const FORM_SUBMIT_STALE_MS = 75 * 1000
 const FORM_LIVE_TTL_SECONDS = 3 * 60
 const FORM_CONTROL_SNAPSHOT_GRACE_MS = 30 * 1000
+export const FORM_SUBMIT_IN_PROGRESS_MESSAGE = 'FORM_SUBMIT_IN_PROGRESS'
 
 function formLiveKey(formKey: string) {
   return `biggame_form_live:${Buffer.from(String(formKey)).toString('base64url')}`
@@ -183,6 +184,8 @@ export async function claimAndPublishFormRoundSubmit(formKey: string, roundIndex
       }])
       await writeFormLiveState(key, existing)
       round = existing.rounds[String(roundIndex)]
+    } else {
+      throw new Error(FORM_SUBMIT_IN_PROGRESS_MESSAGE)
     }
   }
   if (round?.confirmed) throw new Error("Can't send the data as there is already confirmation from another person.")
@@ -195,7 +198,7 @@ export async function claimAndPublishFormRoundSubmit(formKey: string, roundIndex
   }
 
   const claimed = await claimFormRoundSubmit(key, roundIndex)
-  if (!claimed) throw new Error("Can't send the data as there is already confirmation from another person.")
+  if (!claimed) throw new Error(FORM_SUBMIT_IN_PROGRESS_MESSAGE)
 
   await writeFormLiveState(key, nextLiveStateFromPatches(key, existing, [{ index: roundIndex, ...patch }]))
 }

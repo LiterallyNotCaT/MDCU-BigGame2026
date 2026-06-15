@@ -1290,6 +1290,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
 
   const confirmMoneyDropSpecial = async (roundIndex: number) => {
     if (!currentState || !session || !moneyDropSpecial) return
+    if (moneyDropSpecialSaving.has(roundIndex) || isRoundInRef(submittingMoneyDropRoundsByLiveKey, moneyDropSpecial.liveKey, roundIndex)) return
     if (!isAdmin && !canEditCurrentForm) {
       notify('warn', 'This form is view-only for your account.')
       return
@@ -1372,6 +1373,8 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
 
   const confirmRound = async (roundIndex: number) => {
     if (!currentState || !session) return
+    const activeFormKey = currentState.form.formKey
+    if (savingRounds.has(roundIndex) || isRoundInRef(submittingRoundsByForm, activeFormKey, roundIndex)) return
     if (!isAdmin && !canEditCurrentForm) {
       notify('warn', 'This form is view-only for your account.')
       return
@@ -1393,7 +1396,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     }
     if (!window.confirm('Do you confirm? Please check the information carefully before sending.')) return
 
-    markRoundInRef(submittingRoundsByForm, currentState.form.formKey, roundIndex)
+    markRoundInRef(submittingRoundsByForm, activeFormKey, roundIndex)
     setSavingRounds(prev => {
       const next = new Set(prev)
       next.add(roundIndex)

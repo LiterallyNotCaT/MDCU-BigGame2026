@@ -1928,6 +1928,7 @@ function handleWriteWave(payload) {
   const hasIslandPayload = normalizedIslands.length > 0
   const islandSpend = hasIslandPayload ? normalizedIslands.reduce((sum, isl) => sum + isl.amount, 0) : 0
   const hasDisasterOnlyPayload = hasKingDisasterPayload && !hasBetPayload && !hasIslandPayload && kingAmountNumber === null
+  const hasBetOnlyPayload = hasBetPayload && !hasIslandPayload && kingAmountNumber === null && !hasKingDisasterPayload
 
   // Disaster selection is one shared INFO cell (H22) and should not be blocked by
   // bid/bet balance validation or existing spend in the player's row.
@@ -1970,9 +1971,13 @@ function handleWriteWave(payload) {
     (kingAmountNumber !== null ? kingAmountNumber : 0) +
     (hasIslandPayload ? islandSpend : 0)
   const totalSpendAfterSave = nextBetSpend + nextKingSpend + nextIslandSpend
+  const validationSpendAfterSave = hasBetOnlyPayload ? (betAmountNumber || 0) : totalSpendAfterSave
 
   if (betAmountNumber !== null && betAmountNumber < minBetAmount) {
     return { status: 'error', message: `Bet minimum is ${minBetAmount}` }
+  }
+  if (hasBetOnlyPayload && (betAmountNumber || 0) > currentBalance) {
+    return { status: 'error', message: `Bet amount ${betAmountNumber || 0} exceeds balance ${currentBalance}` }
   }
   if (totalSpend <= 0 && !hasDisasterOnlyPayload) {
     return {
@@ -1980,10 +1985,10 @@ function handleWriteWave(payload) {
       message: 'Amount must be greater than 0'
     }
   }
-  if (!hasDisasterOnlyPayload && totalSpendAfterSave > currentBalance) {
+  if (!hasBetOnlyPayload && !hasDisasterOnlyPayload && validationSpendAfterSave > currentBalance) {
     return {
       status: 'error',
-      message: `ยอดรวม ${totalSpendAfterSave} เกินกว่า balance ${currentBalance}`
+      message: `ยอดรวม ${validationSpendAfterSave} เกินกว่า balance ${currentBalance}`
     }
   }
 
@@ -2044,7 +2049,7 @@ function handleWriteWave(payload) {
       kingDisaster: kingDisasterNumber,
       islands: islandList,
       totalSpend,
-      remainingBalance: currentBalance - totalSpendAfterSave,
+      remainingBalance: currentBalance - validationSpendAfterSave,
     }
   }
   if (idempotencyKey) cachePutJson_(idempotencyKey, result, 21600)

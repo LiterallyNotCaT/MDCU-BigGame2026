@@ -2,6 +2,7 @@ import { after, NextResponse } from 'next/server'
 import { auth, isAllowedDocChulaEmail } from '@/auth'
 import {
   claimAndPublishFormRoundSubmit,
+  FORM_SUBMIT_IN_PROGRESS_MESSAGE,
   isFreshFormControlRound,
   isFormLiveRoundSavingStale,
   publishFormRoundPatch,
@@ -164,6 +165,7 @@ export async function POST(req: Request) {
 
     const liveKey = specialLiveKey(formKey)
     const isAdmin = payload.admin === true
+    let claimed = false
     try {
       await claimAndPublishFormRoundSubmit(liveKey, roundIndex, isAdmin, {
         locked: true,
@@ -171,8 +173,15 @@ export async function POST(req: Request) {
         error: '',
         values: [value],
       })
+      claimed = true
     } catch (error) {
-      return jsonError(error instanceof Error ? error.message : String(error), 409)
+      const message = error instanceof Error ? error.message : String(error)
+      if (message === FORM_SUBMIT_IN_PROGRESS_MESSAGE) {
+        return NextResponse.json({ ok: true, queued: true, message: 'Sending to sheet...' }, {
+          headers: { 'Cache-Control': 'no-store' },
+        })
+      }
+      return jsonError(message, 409)
     }
 
     let email = ''
@@ -180,7 +189,7 @@ export async function POST(req: Request) {
       const session = await auth()
       email = session?.user?.email ?? ''
       if (!session?.user || !isAllowedDocChulaEmail(email)) {
-        await releaseFormRoundSubmitClaim(liveKey, roundIndex)
+        if (claimed) await releaseFormRoundSubmitClaim(liveKey, roundIndex)
         return jsonError('Unauthorized', 401)
       }
     }

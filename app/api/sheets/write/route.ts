@@ -21,9 +21,6 @@ type GasWriteResponse = {
 }
 
 const SHEET_WRITE_RETRY_DELAYS_MS = [700, 900, 1600, 3000]
-const writeQueues = (globalThis as typeof globalThis & {
-  __biddingWriteQueues?: Map<string, Promise<void>>
-}).__biddingWriteQueues ??= new Map<string, Promise<void>>()
 
 function jsonError(message: string, status = 500) {
   return NextResponse.json({ ok: false, message }, { status })
@@ -59,42 +56,27 @@ function newClientId() {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
-function writeQueueKey(payload: WritePayload, mode: BiddingWriteMode) {
-  return `${payload.wave}:${payload.baan}:${mode}`
-}
-
-function queuePersistWriteWave(payload: WritePayload, mode: BiddingWriteMode) {
-  const key = writeQueueKey(payload, mode)
-  const previous = writeQueues.get(key) ?? Promise.resolve()
-  const next = previous
-    .catch(() => undefined)
-    .then(() => persistWriteWave(payload, mode))
-    .finally(() => {
-      if (writeQueues.get(key) === next) writeQueues.delete(key)
-    })
-  writeQueues.set(key, next)
-  return next
-}
-
-async function persistWriteWave(payload: WritePayload, mode: BiddingWriteMode) {
+async function persistWriteWave(payload: WritePayload, mode: BiddingWriteMode, options: { checkPending?: boolean; skipFirstDelay?: boolean } = {}) {
   let lastMessage = ''
   let lastRetryable = false
   const clientId = String(payload.clientId || '').trim()
+  const checkPending = options.checkPending !== false
+  const retryDelays = options.skipFirstDelay ? [0, ...SHEET_WRITE_RETRY_DELAYS_MS] : SHEET_WRITE_RETRY_DELAYS_MS
 
-  for (let attempt = 0; attempt < SHEET_WRITE_RETRY_DELAYS_MS.length; attempt++) {
-    const delay = SHEET_WRITE_RETRY_DELAYS_MS[attempt]
+  for (let attempt = 0; attempt < retryDelays.length; attempt++) {
+    const delay = retryDelays[attempt]
     if (delay) await wait(delay)
-    if (clientId && !await isBiddingPendingWriteCurrent(payload.wave, payload.baan, mode, clientId)) {
-      return
+    if (checkPending && clientId && !await isBiddingPendingWriteCurrent(payload.wave, payload.baan, mode, clientId)) {
+      return { ok: true, superseded: true }
     }
 
     try {
       await callGas<GasWriteResponse>({ ...payload })
-      if (clientId && !await isBiddingPendingWriteCurrent(payload.wave, payload.baan, mode, clientId)) {
-        return
+      if (checkPending && clientId && !await isBiddingPendingWriteCurrent(payload.wave, payload.baan, mode, clientId)) {
+        return { ok: true, superseded: true }
       }
-      await deleteBiddingPendingWrite(payload.wave, payload.baan, mode)
-      return
+      if (checkPending) await deleteBiddingPendingWrite(payload.wave, payload.baan, mode)
+      return { ok: true }
     } catch (error) {
       lastMessage = error instanceof Error ? error.message : String(error)
       lastRetryable = shouldRetryGasWrite(lastMessage)
@@ -104,14 +86,16 @@ async function persistWriteWave(payload: WritePayload, mode: BiddingWriteMode) {
 
   if (lastRetryable) {
     console.error('Bid/bet background write is still pending after a retryable GAS error:', lastMessage)
-    return
+    return { ok: false, message: lastMessage }
   }
 
   console.error('Bid/bet background write failed:', lastMessage || 'Unknown error')
+  if (!checkPending) return { ok: false, message: lastMessage || 'Google Sheet write failed' }
   if (clientId && !await isBiddingPendingWriteCurrent(payload.wave, payload.baan, mode, clientId)) {
-    return
+    return { ok: true, superseded: true }
   }
   await markBiddingPendingWriteFailed(payload.wave, payload.baan, mode, lastMessage || 'Google Sheet write failed')
+  return { ok: false, message: lastMessage || 'Google Sheet write failed' }
 }
 
 export async function POST(req: Request) {
@@ -130,8 +114,28 @@ export async function POST(req: Request) {
     const mode = classifyBiddingWriteMode(payload)
     const clientId = String((payload as { clientId?: unknown }).clientId || newClientId()).trim()
     const writePayload: WritePayload = { ...payload, clientId }
-    await publishBiddingPendingWrite(writePayload, mode, clientId)
-    after(() => queuePersistWriteWave(writePayload, mode))
+    if (mode === 'bet') {
+      const result = await persistWriteWave(writePayload, mode, { checkPending: false, skipFirstDelay: true })
+      if (!result.ok) return jsonError(result.message || 'Google Sheet write failed', statusForGasError(result.message || ''))
+      return NextResponse.json({
+        ok: true,
+        queued: false,
+        saving: false,
+        clientId,
+        message: 'Sent to sheet',
+      }, {
+        headers: { 'Cache-Control': 'no-store' },
+      })
+    }
+
+    let pendingPublished = true
+    try {
+      await publishBiddingPendingWrite(writePayload, mode, clientId)
+    } catch (error) {
+      pendingPublished = false
+      console.error('Bid/bet Redis pending publish failed; falling back to direct GAS write:', error)
+    }
+    after(() => persistWriteWave(writePayload, mode, { checkPending: pendingPublished }))
 
     return NextResponse.json({
       ok: true,

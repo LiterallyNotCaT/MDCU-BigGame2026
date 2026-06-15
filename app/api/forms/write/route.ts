@@ -2,6 +2,7 @@ import { after, NextResponse } from 'next/server'
 import { auth, isAllowedDocChulaEmail } from '@/auth'
 import {
   claimAndPublishFormRoundSubmit,
+  FORM_SUBMIT_IN_PROGRESS_MESSAGE,
   publishFormRoundPatch,
   publishFormRoundSavedSignal,
   releaseFormRoundSubmitClaim,
@@ -38,6 +39,7 @@ export async function POST(req: Request) {
       return jsonError('Please enter data before confirming.', 400)
     }
 
+    let claimed = false
     try {
       await claimAndPublishFormRoundSubmit(formKey, roundIndex, isAdmin, {
         locked: true,
@@ -46,6 +48,7 @@ export async function POST(req: Request) {
         participants: String(payload.participants ?? ''),
         values,
       })
+      claimed = true
 
       let email = ''
       if (payload.oauth === true) {
@@ -59,12 +62,21 @@ export async function POST(req: Request) {
         headers: { 'Cache-Control': 'no-store' },
       })
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (!claimed) {
+        if (message === FORM_SUBMIT_IN_PROGRESS_MESSAGE) {
+          return NextResponse.json({ ok: true, queued: true, message: 'Sending to sheet...' }, {
+            headers: { 'Cache-Control': 'no-store' },
+          })
+        }
+        throw error
+      }
       await releaseFormRoundSubmitClaim(formKey, roundIndex)
       await publishFormRoundPatch(formKey, [{
         index: roundIndex,
         locked: false,
         saving: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: message,
       }]).catch(err => {
         console.error('Form live unlock after failed write failed:', err)
       })

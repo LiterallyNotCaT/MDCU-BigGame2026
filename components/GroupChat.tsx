@@ -10,6 +10,12 @@ import {
 } from '@/lib/sheets'
 import { getGameState, subscribeStore } from '@/lib/store'
 
+function sameChatPermissions(a: ChatPermissions, b: ChatPermissions) {
+  return a.groupChat === b.groupChat
+    && a.adminPrivate === b.adminPrivate
+    && a.playerPrivate === b.playerPrivate
+}
+
 function isAdminActor(actor: GroupChatActor) {
   return String(actor).trim().toLowerCase() === 'admin'
 }
@@ -335,7 +341,10 @@ export default function GroupChat({
   )
 
   useEffect(() => {
-    const update = () => setChatPermissions(normalizeChatPermissions(getGameState().chatPermissions))
+    const update = () => {
+      const next = normalizeChatPermissions(getGameState().chatPermissions)
+      setChatPermissions(current => sameChatPermissions(current, next) ? current : next)
+    }
     update()
     return subscribeStore(update)
   }, [])

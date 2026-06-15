@@ -256,6 +256,12 @@ function normalizeSheetBetTarget(value: string) {
   return Number.isInteger(baan) && baan >= 1 && baan <= 12 ? String(baan) : ''
 }
 
+function sameWaveInputRow(a: WaveInputRow | null, b: WaveInputRow | null) {
+  if (a === b) return true
+  if (!a || !b) return false
+  return JSON.stringify(a) === JSON.stringify(b)
+}
+
 type EventRank = { rank: number; baan: number; saving?: boolean }
 type EventStatus = {
   wave: number
@@ -775,7 +781,6 @@ function BiddingGame({ baan }: { baan:number }) {
   const [resultToast, setResultToast] = useState<{ wave: number; key: number; leaving?: boolean } | null>(null)
   const [highlightedResultWave, setHighlightedResultWave] = useState<{ wave: number; leaving?: boolean } | null>(null)
   const saveInFlight = useRef(false)
-  const queuedBetSaveMode = useRef<'manual' | 'auto' | null>(null)
   const lastSuccessfulSaveAt = useRef(0)
   const pendingSheetWriteUntil = useRef(0)
   const betTargetRef = useRef('')
@@ -869,7 +874,7 @@ function BiddingGame({ baan }: { baan:number }) {
   )
   const hasExistingBetInput = hasBetSheetInput || hasFreshLocalBetInput
   const isBetSubmitSaved = isBetMode && isSaved && (sheetBetMatchesCurrent || freshLocalBetMatchesCurrent)
-  const isBetSubmitDisabled = !gs.isOpen || !betTarget || !isBetAmountValid || isBetSubmitSaved
+  const isBetSubmitDisabled = !gs.isOpen || isSyncing || !betTarget || !isBetAmountValid || isBetSubmitSaved
   const betSubmitVerb = hasExistingBetInput ? 'Resubmit' : 'Submit'
 
   useEffect(() => {
@@ -961,14 +966,16 @@ function BiddingGame({ baan }: { baan:number }) {
   }, [draftReady, draftKey, isBetMode, isSelectDisasterPhase, betTarget, betAmount, kingDis, cart, isSaved])
 
   const applySheetInput = useCallback((row: WaveInputRow | null, info: { king: number | null; viewingKing: number | null; kingDisaster: number | null }) => {
-    setSheetInput(row)
-    setSheetSnapshotLoaded(true)
-    setCurrentKing(info.viewingKing)
-    setKingOwner(info.king)
-    setIsKing(info.viewingKing === baan)
-    setActiveDisaster(gs.currentWave, info.kingDisaster)
-    setSheetBetSpend(row?.betAmount || 0)
-    if (row) setBalance(row.balance || 0)
+    setSheetInput(prev => sameWaveInputRow(prev, row) ? prev : row)
+    setSheetSnapshotLoaded(prev => prev || true)
+    setCurrentKing(prev => prev === info.viewingKing ? prev : info.viewingKing)
+    setKingOwner(prev => prev === info.king ? prev : info.king)
+    setIsKing(prev => prev === (info.viewingKing === baan) ? prev : info.viewingKing === baan)
+    if (getActiveDisasterForWave(gs.currentWave) !== info.kingDisaster) {
+      setActiveDisaster(gs.currentWave, info.kingDisaster)
+    }
+    setSheetBetSpend(prev => prev === (row?.betAmount || 0) ? prev : row?.betAmount || 0)
+    if (row) setBalance(prev => prev === (row.balance || 0) ? prev : row.balance || 0)
 
     const state = getGameState()
     let hasStoredDraft = readBiddingDraft(draftKey) !== null
@@ -1061,6 +1068,11 @@ function BiddingGame({ baan }: { baan:number }) {
     }
   }, [baan, betSpend, betTarget, cart, currentSubmission, draftKey, gs.currentWave, isBetMode, isSaved, isSyncing, kingDis])
 
+  const applySheetInputRef = useRef(applySheetInput)
+  useEffect(() => {
+    applySheetInputRef.current = applySheetInput
+  }, [applySheetInput])
+
   const fetchSheetSnapshot = useCallback(async () => {
     if (sheetSnapshotInFlight.current) return
     sheetSnapshotInFlight.current = true
@@ -1069,13 +1081,13 @@ function BiddingGame({ baan }: { baan:number }) {
       const data = await fetchWaveInputs(wave)
       if (wave !== getGameState().currentWave) return
       const row = data.rows.find(item => item.baan === baan) ?? null
-      applySheetInput(row, { king: data.king, viewingKing: data.viewingKing, kingDisaster: data.kingDisaster })
+      applySheetInputRef.current(row, { king: data.king, viewingKing: data.viewingKing, kingDisaster: data.kingDisaster })
     } catch (e) {
       if (!isTransientFetchFailure(e)) console.warn('Wave input refresh failed:', e)
     } finally {
       sheetSnapshotInFlight.current = false
     }
-  }, [applySheetInput, baan])
+  }, [baan])
 
   useEffect(() => {
     const refresh = () => { void fetchSheetSnapshot() }
@@ -1297,14 +1309,7 @@ function BiddingGame({ baan }: { baan:number }) {
       setBetTarget(String(betTargetNumberForSave))
     }
     if(mode === 'auto' && isSaved && sheetMatchesCurrentInput) return
-    if(saveInFlight.current) {
-      if (isBetMode) {
-        queuedBetSaveMode.current = mode
-        setSaveMessage('Latest bet will save next...')
-        setIsSaved(false)
-      }
-      return
-    }
+    if(saveInFlight.current) return
     const hasInvalidBidAmount = cart.some(i => !Number.isFinite(i.amount) || i.amount < 100)
     if(isBetMode && (!hasBetTargetForSave || !isBetAmountValidForSave)) return
     const canSubmitDisaster = canSelectKingDisaster || (mode === 'auto' && isSelectDisasterPhase && canChooseKingDisaster)
@@ -1371,11 +1376,6 @@ function BiddingGame({ baan }: { baan:number }) {
       if (!res.ok) {
         setIsSaved(false)
         console.warn('Sheet write failed:', res.message)
-        const queuedMode = queuedBetSaveMode.current
-        queuedBetSaveMode.current = null
-        if (isBetMode && queuedMode) {
-          setTimeout(() => { void handleSave(queuedMode) }, 0)
-        }
         return
       }
       if (res.queued) {
@@ -1393,11 +1393,6 @@ function BiddingGame({ baan }: { baan:number }) {
         void fetchBalance()
         void fetchSheetSnapshot()
       }, res.queued ? 2500 : 300)
-      const queuedMode = queuedBetSaveMode.current
-      queuedBetSaveMode.current = null
-      if (isBetMode && queuedMode) {
-        setTimeout(() => { void handleSave(queuedMode) }, 0)
-      }
     }).catch(e => {
       saveInFlight.current = false
       pendingSheetWriteUntil.current = 0
@@ -1406,11 +1401,6 @@ function BiddingGame({ baan }: { baan:number }) {
       setSaveMessage('Admin sync error')
       setIsSaved(false)
       console.error(e)
-      const queuedMode = queuedBetSaveMode.current
-      queuedBetSaveMode.current = null
-      if (isBetMode && queuedMode) {
-        setTimeout(() => { void handleSave(queuedMode) }, 0)
-      }
     })
   },[baan,cart,gs.currentWave,gs.isOpen,isSaved,canChooseKingDisaster,canSelectKingDisaster,kingDis,balance,minBetAmount,totalBet,isBetMode,isEventMode,isSelectDisasterPhase,betTarget,betAmount,betSpend,sheetInput,fetchBalance,fetchSheetSnapshot,effectiveBalance,currentSubmission,islandCart,kingBid,kingBidAmount,draftKey])
 
@@ -1525,7 +1515,7 @@ function BiddingGame({ baan }: { baan:number }) {
                       <div>
                         <label className="text-label mb-2 block">House to bet on</label>
                         <select value={betTarget} onChange={e=>{betTargetRef.current = e.target.value; setBetTarget(e.target.value); setSaveMessage(''); setIsSaved(false)}}
-                          disabled={!gs.isOpen}
+                          disabled={!gs.isOpen || isSyncing}
                           className="input-base">
                           <option value="">Choose house</option>
                           {Array.from({length:12},(_,i)=>i+1).map(b=><option key={b} value={b}>{HOUSE_NAMES[b]}</option>)}
@@ -1533,7 +1523,7 @@ function BiddingGame({ baan }: { baan:number }) {
                       </div>
                       <div>
                         <label className="text-label mb-2 block">Bet amount</label>
-                        <input type="text" inputMode="numeric" pattern="[0-9]*" value={betAmount} disabled={!gs.isOpen}
+                        <input type="text" inputMode="numeric" pattern="[0-9]*" value={betAmount} disabled={!gs.isOpen || isSyncing}
                           onChange={e=>{
                             const next = sanitizeMoneyInput(e.target.value)
                             betAmountRef.current = next
@@ -1624,6 +1614,7 @@ function BiddingGame({ baan }: { baan:number }) {
                   onSubmit={() => { void handleSave('manual') }} isSaved={isSaved} savedAt={savedAt} isOpen={gs.isOpen}
                   isSyncing={isSyncing}
                   syncLabel={syncReason === 'auto' ? 'Autosaving...' : 'Sending to admin...'}
+                  statusMessage={saveMessage}
                   bidOpen={canEditBid}
                   disasterOpen={canSelectKingDisaster}
                   isDisasterPhase={isSelectDisasterPhase} />

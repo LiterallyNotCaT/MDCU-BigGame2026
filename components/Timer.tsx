@@ -17,25 +17,37 @@ export default function Timer({ endTime, isOpen, onExpire, compact }: TimerProps
   const [phase,     setPhase]     = useState<'welcome' | 'rules' | 'play' | 'select-disaster'>('welcome')
   const totalRef    = useRef(0)
   const expiredRef  = useRef(false)
+  const onExpireRef = useRef(onExpire)
 
   useEffect(() => {
-    setPhase(getGameState().gamePhase || 'welcome')
+    onExpireRef.current = onExpire
+  }, [onExpire])
+
+  useEffect(() => {
+    const syncPhase = () => {
+      const nextPhase = getGameState().gamePhase || 'welcome'
+      setPhase(current => current === nextPhase ? current : nextPhase)
+    }
+    syncPhase()
     const unsub = subscribeStore(() => {
-      setPhase(getGameState().gamePhase || 'welcome')
+      syncPhase()
     })
     return unsub
   }, [])
 
   const tick = useCallback(() => {
-    if (!endTime || !isOpen) { setRemaining(0); return }
+    if (!endTime || !isOpen) {
+      setRemaining(current => current === 0 ? current : 0)
+      return
+    }
     const diff = new Date(endTime).getTime() - Date.now()
     if (diff <= 0) {
-      setRemaining(0)
-      if (!expiredRef.current) { expiredRef.current = true; setExpired(true); onExpire?.() }
+      setRemaining(current => current === 0 ? current : 0)
+      if (!expiredRef.current) { expiredRef.current = true; setExpired(true); onExpireRef.current?.() }
     } else {
-      setRemaining(diff); setExpired(false); expiredRef.current = false
+      setRemaining(diff); setExpired(current => current ? false : current); expiredRef.current = false
     }
-  }, [endTime, isOpen, onExpire])
+  }, [endTime, isOpen])
 
   useEffect(() => {
     if (endTime && isOpen) {
@@ -44,7 +56,7 @@ export default function Timer({ endTime, isOpen, onExpire, compact }: TimerProps
     } else {
       totalRef.current = 0
     }
-    expiredRef.current = false; setExpired(false)
+    expiredRef.current = false; setExpired(current => current ? false : current)
     tick()
   }, [endTime, isOpen]) // eslint-disable-line
 

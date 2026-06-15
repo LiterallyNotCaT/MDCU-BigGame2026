@@ -21,6 +21,7 @@ interface BiddingCartProps {
   isOpen:        boolean
   isSyncing?:     boolean
   syncLabel?:     string
+  statusMessage?: string
   bidOpen?:      boolean
   disasterOpen?: boolean
   isDisasterPhase?: boolean
@@ -36,7 +37,7 @@ function sanitizeMoneyInput(value: string) {
 function BiddingCart({
   baan, balance, displayBalance, items, isKing, kingDisaster,
   onUpdate, onKingDisaster, onSubmit, isSaved, savedAt, isOpen,
-  isSyncing = false, syncLabel = 'Sending to admin...', bidOpen = isOpen, disasterOpen = isOpen && isKing, isDisasterPhase = false,
+  isSyncing = false, syncLabel = 'Sending to admin...', statusMessage = '', bidOpen = isOpen, disasterOpen = isOpen && isKing, isDisasterPhase = false,
 }: BiddingCartProps) {
   const color      = HOUSE_COLORS[baan]
   const maxAmountForArea = (area: string) => {
@@ -332,6 +333,14 @@ function BiddingCart({
               </span>
             )}
         </button>
+        {(isSyncing || statusMessage) && (
+          <div className={clsx(
+            'cart-save-helper text-center font-display text-xs',
+            statusMessage.toLowerCase().includes('error') ? 'text-red-500' : 'text-emerald-600',
+          )}>
+            {isSyncing ? syncLabel : statusMessage}
+          </div>
+        )}
         {isSaved && isOpen && !isSyncing && (
           <div className="cart-save-helper">
             ผู้เล่นยังสามารถแก้ไขข้อมูลได้จนกว่าจะหมดเวลา

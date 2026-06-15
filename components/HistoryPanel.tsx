@@ -1,7 +1,7 @@
 'use client'
 import type { CSSProperties } from 'react'
 import clsx from 'clsx'
-import { HOUSE_COLORS, HOUSE_NAMES } from '@/lib/constants'
+import { HOUSE_COLORS, HOUSE_NAMES, HOUSE_TEXT_COLORS } from '@/lib/constants'
 import { TrendingUp, TrendingDown, Target, Star, AlertTriangle, Sunrise } from 'lucide-react'
 
 interface HistoryDetailLine {
@@ -57,6 +57,7 @@ export default function HistoryPanel({
   isRevealHighlightLeaving = false,
 }: HistoryPanelProps) {
   const color = baan ? HOUSE_COLORS[baan] : '#3b82f6'
+  const textColor = baan ? HOUSE_TEXT_COLORS[baan] : '#ffffff'
 
   // Group by wave
   const grouped: Record<string | number, HistoryEntry[]> = {}
@@ -84,9 +85,9 @@ export default function HistoryPanel({
           {title && <h3 className="history-panel-title font-display font-semibold text-sm text-slate-300">{title}</h3>}
           {baan && (
             <span className="badge" style={{
-              background: color + '18',
-              color,
-              borderColor: color + '30',
+              background: color,
+              color: textColor,
+              borderColor: 'rgba(15, 23, 42, 0.24)',
             }}>
               {HOUSE_NAMES[baan]}
             </span>
@@ -114,7 +115,7 @@ export default function HistoryPanel({
               <div className="history-wave-divider flex items-center gap-3 mb-2.5">
                 <div className="flex-1 h-px" style={{ background: `linear-gradient(90deg, ${color}40, transparent)` }} />
                 <span className="history-wave-divider-label text-2xs font-display font-bold tracking-widest px-3 py-1.5 rounded-full"
-                  style={{ background: color + '18', color }}>
+                  style={{ background: color, color: textColor, borderColor: 'rgba(15, 23, 42, 0.24)' }}>
                   {isStart ? 'เริ่มต้น' : `รอบที่ ${key}`}
                 </span>
                 <div className="flex-1 h-px" style={{ background: `linear-gradient(90deg, transparent, ${color}40)` }} />
