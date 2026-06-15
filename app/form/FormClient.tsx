@@ -950,7 +950,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
           applyFormState(selectedState)
           if (options?.force === true) sheetFreshLoadedForms.current.add(nextFormKey)
         } else {
-          setStateLoadError('Table is not loaded.')
+          setStateLoadError('')
         }
         return
       }
@@ -964,7 +964,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
           applyFormState(selectedState)
           if (options?.force === true) sheetFreshLoadedForms.current.add(nextFormKey)
         } else {
-          setStateLoadError('Table is not loaded.')
+          setStateLoadError('')
         }
         return
       }
@@ -1927,7 +1927,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
                 <FileSpreadsheet size={26} />
                 <div>{currentForm.user} is left blank for now.</div>
               </div>
-            ) : loadingState && !currentState ? (
+            ) : (loadingState || (canLoadSelectedForm && !stateLoadError)) && !currentState ? (
               <div className="form-empty-state">Loading table...</div>
             ) : !currentState ? (
               <div className="form-empty-state">

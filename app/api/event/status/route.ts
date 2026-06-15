@@ -3,6 +3,7 @@ import {
   eventAnswerOptions,
   mergeEventPendingIntoStatus,
   normalizeEventWave,
+  readEventStatusCache,
   warmEventAnswers,
   writeEventStatusCache,
   type EventSafeStatus,
@@ -37,6 +38,14 @@ export async function GET(req: Request) {
     return NextResponse.json(mergedData, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, private' } })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
+    const cached = await readEventStatusCache(wave).catch(() => null)
+    if (cached?.status) {
+      const fallbackData = await mergeEventPendingIntoStatus(wave, cached.status)
+      return NextResponse.json({
+        ...fallbackData,
+        warning: message,
+      }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, private' } })
+    }
     return NextResponse.json({ status: 'error', message }, { status: 500 })
   }
 }

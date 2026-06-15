@@ -358,7 +358,7 @@ function EventGamePanel({ baan, wave, isOpen, showSolution }: { baan: number; wa
             results: data.results,
           }))
         }
-        setMessage(data.saving || data.queued ? `Correct! Rank ${data.rank ?? '-'} - Saving...` : `Correct! Rank ${data.rank ?? '-'}`)
+        setMessage(`Correct! Rank ${data.rank ?? '-'}`)
         setAnswer('')
         void refreshStatus()
       } else {
@@ -436,7 +436,7 @@ function EventGamePanel({ baan, wave, isOpen, showSolution }: { baan: number; wa
             <span className="event-rank-number">{item.rank}</span>
             <strong>
               {HOUSE_NAMES[item.baan]}
-              {item.saving && <span className="ml-1 text-[10px] font-bold text-blue-600">Saving...</span>}
+              {item.saving && item.baan !== baan && <span className="ml-1 text-[10px] font-bold text-blue-600">Saving...</span>}
             </strong>
           </div>
         )) : (
@@ -776,6 +776,7 @@ function BiddingGame({ baan }: { baan:number }) {
   const [highlightedResultWave, setHighlightedResultWave] = useState<{ wave: number; leaving?: boolean } | null>(null)
   const saveInFlight = useRef(false)
   const lastSuccessfulSaveAt = useRef(0)
+  const lastSubmittedSignature = useRef('')
   const pendingSheetWriteUntil = useRef(0)
   const hydratedSubmissionKey = useRef('')
   const historySectionRef = useRef<HTMLElement | null>(null)
@@ -1237,12 +1238,6 @@ function BiddingGame({ baan }: { baan:number }) {
   const handleSave = useCallback(async (mode: 'manual' | 'auto' = 'manual')=>{
     if(!gs.isOpen && mode !== 'auto') return
     if(isEventMode) return
-    const recentSuccessfulSave = Date.now() - lastSuccessfulSaveAt.current < 5000
-    const hasSheetInputForCurrentMode = isBetMode
-      ? hasBetSheetInput
-      : isSelectDisasterPhase
-        ? kingDis != null
-        : sheetInput?.hasBidInput === true
     const hasCompleteBetInputForAuto = isBetMode && mode === 'auto' && Boolean(betTarget) && isBetAmountValid
     const betTargetForSave = isBetMode && mode === 'auto'
       ? hasCompleteBetInputForAuto ? betTarget : betTarget || String(baan)
@@ -1259,13 +1254,32 @@ function BiddingGame({ baan }: { baan:number }) {
       && Number.isFinite(betSpendForSave)
       && betSpendForSave >= minBetAmount
       && betSpendForSave <= balance
+    const submittedSignature = isBetMode
+      ? `bet:${gs.currentWave}:${baan}:${hasBetTargetForSave ? betTargetNumberForSave : ''}:${betSpendForSave}`
+      : isSelectDisasterPhase
+        ? `disaster:${gs.currentWave}:${baan}:${kingDis ?? ''}`
+        : `bid:${gs.currentWave}:${baan}:${cart.map(item => `${item.area}:${item.amount}`).join('|')}`
+    const recentSuccessfulSave = Date.now() - lastSuccessfulSaveAt.current < 5000
+      && lastSubmittedSignature.current === submittedSignature
+    const sheetMatchesCurrentInput = isBetMode
+      ? Boolean(
+        sheetInput
+          && sheetInput.pending !== true
+          && sheetInput.hasBetInput === true
+          && hasBetTargetForSave
+          && normalizeSheetBetTarget(sheetInput.betTarget) === String(betTargetNumberForSave)
+          && Number(sheetInput.betAmount) === betSpendForSave,
+      )
+      : isSelectDisasterPhase
+        ? kingDis != null && getActiveDisasterForWave(gs.currentWave) === kingDis
+        : Boolean(sheetInput && sheetInput.pending !== true && sheetInput.hasBidInput === true && cartMatchesSheetInput(sheetInput, cart))
     if (isBetMode && mode === 'auto' && !hasCompleteBetInputForAuto && balance > 0 && betSpendForSave > 0 && betSpendForSave !== betSpend) {
       setBetAmount(String(betSpendForSave))
     }
     if (isBetMode && mode === 'auto' && !hasCompleteBetInputForAuto && !betTarget && hasBetTargetForSave) {
       setBetTarget(String(betTargetNumberForSave))
     }
-    if(mode === 'auto' && isSaved && (hasSheetInputForCurrentMode || recentSuccessfulSave)) return
+    if(mode === 'auto' && isSaved && (sheetMatchesCurrentInput || recentSuccessfulSave)) return
     if(saveInFlight.current) return
     const hasInvalidBidAmount = cart.some(i => !Number.isFinite(i.amount) || i.amount < 100)
     if(isBetMode && (!hasBetTargetForSave || !isBetAmountValidForSave)) return
@@ -1275,6 +1289,7 @@ function BiddingGame({ baan }: { baan:number }) {
 
     const timestamp = new Date().toLocaleTimeString('th-TH')
     saveInFlight.current = true
+    lastSubmittedSignature.current = submittedSignature
     setIsSyncing(true)
     setSyncReason(mode)
     setSaveMessage(mode === 'auto' ? 'Autosaving...' : 'Sending to admin...')
