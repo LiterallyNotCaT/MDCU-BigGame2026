@@ -102,6 +102,10 @@ function normalizeMoneyDropSpecialGroupText(value: string) {
   return Array.from(new Set(groups)).join(', ')
 }
 
+function isBlankFormColumn(state: ScoringFormState, roundIndex: number) {
+  return state.values.every(row => !String(row[roundIndex] ?? '').trim())
+}
+
 type StoredFormSession = {
   sessions: Record<string, Session>
   adminSession: Session | null
@@ -475,9 +479,20 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     return rounds
   }
 
-  const mergeFormStateWithLocalDraft = useCallback((incoming: ScoringFormState) => {
+  const clearLocalRoundState = (key: string, roundIndex: number) => {
+    clearRoundInRef(dirtyRoundsByForm, key, roundIndex)
+    clearRoundInRef(submittingRoundsByForm, key, roundIndex)
+    clearRecentConfirmedRound(key, roundIndex)
+  }
+
+  const mergeFormStateWithLocalDraft = useCallback((incoming: ScoringFormState, options?: { trustSheetBlank?: boolean }) => {
     incoming = normalizeScoringFormState(incoming)
     const formKey = incoming.form.formKey
+    if (options?.trustSheetBlank) {
+      incoming.rounds.forEach((_, index) => {
+        if (isBlankFormColumn(incoming, index)) clearLocalRoundState(formKey, index)
+      })
+    }
     const protectedRounds = protectedRoundsForForm(formKey)
     const recentConfirmedRounds = new Set<number>()
     incoming.rounds.forEach((round, index) => {
@@ -497,9 +512,6 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
         clearRoundInRef(dirtyRoundsByForm, formKey, roundIndex)
         clearRoundInRef(submittingRoundsByForm, formKey, roundIndex)
         protectedRounds.delete(roundIndex)
-      } else if (incomingRound && incomingRound.saving !== true && isRoundInRef(submittingRoundsByForm, formKey, roundIndex)) {
-        clearRoundInRef(submittingRoundsByForm, formKey, roundIndex)
-        if (!isRoundInRef(dirtyRoundsByForm, formKey, roundIndex)) protectedRounds.delete(roundIndex)
       }
     })
     if (!protectedRounds.size) return incoming
@@ -559,9 +571,6 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
         clearRoundInRef(dirtyMoneyDropRoundsByLiveKey, liveKey, roundIndex)
         clearRoundInRef(submittingMoneyDropRoundsByLiveKey, liveKey, roundIndex)
         protectedRounds.delete(roundIndex)
-      } else if (incomingRound && incomingRound.saving !== true && isRoundInRef(submittingMoneyDropRoundsByLiveKey, liveKey, roundIndex)) {
-        clearRoundInRef(submittingMoneyDropRoundsByLiveKey, liveKey, roundIndex)
-        if (!isRoundInRef(dirtyMoneyDropRoundsByLiveKey, liveKey, roundIndex)) protectedRounds.delete(roundIndex)
       }
     })
     if (!protectedRounds.size) return incoming
@@ -621,6 +630,15 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
       if (!liveRound) return round
       if (!isFreshLiveRound(liveRound)) return round
       const useLiveValues = liveRound.saving === true
+      const submitting = isRoundInRef(submittingRoundsByForm, live.formKey, index)
+      if (submitting && liveRound.confirmed !== true && !liveRound.error) {
+        return {
+          ...round,
+          locked: true,
+          saving: true,
+          error: '',
+        }
+      }
       if (
         round.confirmed === liveRound.confirmed
         && round.locked === liveRound.locked
@@ -708,6 +726,15 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
           const liveRound = live.rounds[String(round.index)]
           if (!liveRound) return round
           if (!isFreshLiveRound(liveRound)) return round
+          const submitting = isRoundInRef(submittingMoneyDropRoundsByLiveKey, live.formKey, round.index)
+          if (submitting && liveRound.confirmed !== true && !liveRound.error) {
+            return {
+              ...round,
+              saving: true,
+              locked: true,
+              error: '',
+            }
+          }
           return {
             ...round,
             value: shouldUseLiveValues(round.index, liveRound) ? liveRound.values?.[0] ?? round.value : round.value,
@@ -765,8 +792,8 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     }
   }, [])
 
-  const applyFormState = useCallback((incomingState: ScoringFormState) => {
-    const nextState = mergeFormStateWithLocalDraft(incomingState)
+  const applyFormState = useCallback((incomingState: ScoringFormState, options?: { trustSheetBlank?: boolean }) => {
+    const nextState = mergeFormStateWithLocalDraft(incomingState, options)
     const nextDraft = blankDraft(nextState)
     const nextFillToRank = clampFillToRank(nextState.fillToRank || nextState.form.defaultFillToRank)
     const nextParticipants = nextState.rounds.map(round => defaultParticipants(round.participants))
@@ -789,7 +816,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     (grouped[tabName] ?? []).filter(form => !form.blank).map(form => form.formKey)
   ), [grouped])
 
-  const loadStatesForTab = useCallback(async (tabName: string, options?: { password?: string; oauth?: boolean; force?: boolean }) => {
+  const loadStatesForTab = useCallback(async (tabName: string, options?: { password?: string; oauth?: boolean; force?: boolean; trustSheetBlank?: boolean }) => {
     const formKeys = formKeysForTab(tabName)
     if (!formKeys.length) return {}
     const requestSeq = ++formStateRequestSeq.current
@@ -817,7 +844,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
       Object.keys(acceptedStates).forEach(key => sheetFreshLoadedForms.current.add(key))
     }
     const mergedAcceptedStates = Object.fromEntries(
-      Object.entries(acceptedStates).map(([key, item]) => [key, mergeFormStateWithLocalDraft(item)] as const),
+      Object.entries(acceptedStates).map(([key, item]) => [key, mergeFormStateWithLocalDraft(item, { trustSheetBlank: options?.trustSheetBlank === true })] as const),
     ) as Record<string, ScoringFormState>
     if (Object.keys(mergedAcceptedStates).length) {
       statesByFormKeyRef.current = { ...statesByFormKeyRef.current, ...mergedAcceptedStates }
@@ -918,7 +945,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     }
   }, [adminSession, formKey, sessions, sessionsRestored, tab])
 
-  const refreshState = useCallback(async (nextFormKey = formKey, options?: { force?: boolean }) => {
+  const refreshState = useCallback(async (nextFormKey = formKey, options?: { force?: boolean; trustSheetBlank?: boolean }) => {
     if (!nextFormKey) return
     const cachedState = options?.force ? null : statesByFormKeyRef.current[nextFormKey]
     if (cachedState) {
@@ -939,7 +966,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
           body: JSON.stringify({ formKey: nextFormKey, force: true }),
         })
         if (latestFormStateRequestSeq.current[nextFormKey] !== requestSeq) return
-        const appliedState = applyFormState(data.state)
+        const appliedState = applyFormState(data.state, { trustSheetBlank: options?.trustSheetBlank === true })
         sheetFreshLoadedForms.current.add(nextFormKey)
         statesByFormKeyRef.current = { ...statesByFormKeyRef.current, [nextFormKey]: appliedState }
         setStatesByFormKey(prev => ({ ...prev, [nextFormKey]: appliedState }))
@@ -949,6 +976,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
         const loadedStates = await loadStatesForTab(selectedForm.tab, {
           password: adminSession?.password ?? '',
           force: options?.force === true,
+          trustSheetBlank: options?.trustSheetBlank === true,
         })
         const selectedState = loadedStates[nextFormKey] ?? statesByFormKeyRef.current[nextFormKey]
         if (selectedState) {
@@ -963,6 +991,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
         const loadedStates = await loadStatesForTab(selectedForm.tab, {
           oauth: true,
           force: options?.force === true,
+          trustSheetBlank: options?.trustSheetBlank === true,
         })
         const selectedState = loadedStates[nextFormKey] ?? statesByFormKeyRef.current[nextFormKey]
         if (selectedState) {
@@ -980,7 +1009,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
         body: JSON.stringify({ formKey: nextFormKey, force: options?.force === true }),
       })
       if (latestFormStateRequestSeq.current[nextFormKey] !== requestSeq) return
-      const appliedState = applyFormState(data.state)
+      const appliedState = applyFormState(data.state, { trustSheetBlank: options?.trustSheetBlank === true })
       if (options?.force === true) sheetFreshLoadedForms.current.add(nextFormKey)
       statesByFormKeyRef.current = { ...statesByFormKeyRef.current, [nextFormKey]: appliedState }
       setStatesByFormKey(prev => ({ ...prev, [nextFormKey]: appliedState }))
@@ -1940,7 +1969,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
             ) : !currentState ? (
               <div className="form-empty-state">
                 <div>{stateLoadError || 'Table is not loaded.'}</div>
-                <button type="button" onClick={() => refreshState(currentForm.formKey, { force: true })} className="btn btn-primary">
+                <button type="button" onClick={() => refreshState(currentForm.formKey, { force: true, trustSheetBlank: true })} className="btn btn-primary">
                   <RefreshCw size={14} /> Retry
                 </button>
               </div>
@@ -1950,7 +1979,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
                   <div>
                     <h1>{currentState.title || currentState.form.user}</h1>
                   </div>
-                  <button type="button" onClick={() => refreshState(currentState.form.formKey, { force: true })} className="btn btn-ghost">
+                  <button type="button" onClick={() => refreshState(currentState.form.formKey, { force: true, trustSheetBlank: true })} className="btn btn-ghost">
                     <RefreshCw size={14} /> Refresh
                   </button>
                 </div>
@@ -2072,7 +2101,9 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
                         <th>Confirm</th>
                         {visibleRounds.map((round, roundIndex) => {
                           const timedOut = Boolean(round.deadlineAt && Date.now() > new Date(round.deadlineAt).getTime())
-                          const isSending = savingRounds.has(roundIndex) || round.saving === true
+                          const isSending = savingRounds.has(roundIndex)
+                            || round.saving === true
+                            || isRoundInRef(submittingRoundsByForm, currentState.form.formKey, roundIndex)
                           const disabled = isSending || !canEditCurrentForm || (!isAdmin && (round.confirmed || round.locked || timedOut))
                           return (
                             <td key={round.index} className={clsx(selectedRound === roundIndex && 'active-round')}>
