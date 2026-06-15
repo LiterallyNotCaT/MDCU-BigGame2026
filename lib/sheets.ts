@@ -20,6 +20,16 @@ const CLIENT_WAVE_INPUT_RETRY_DELAY_MS = 350
 const clientWaveInputsCache = new Map<number, { at: number; data: WaveInputsResult }>()
 const clientWaveInputsInFlight = new Map<number, Promise<WaveInputsResult>>()
 
+export function clearWaveInputsCache(wave?: number) {
+  if (wave === undefined) {
+    clientWaveInputsCache.clear()
+    clientWaveInputsInFlight.clear()
+    return
+  }
+  clientWaveInputsCache.delete(wave)
+  clientWaveInputsInFlight.delete(wave)
+}
+
 // ── Column map (1-indexed, for reference) ──────────────────
 // Wave sheet rows 5–16 = บ้าน 1–12
 // Col A (1)  = บ้านที่

@@ -33,7 +33,7 @@ type RoundPatch = {
 const FORM_SUBMIT_CLAIM_TTL_SECONDS = 75
 const FORM_SUBMIT_STALE_MS = 75 * 1000
 const FORM_LIVE_TTL_SECONDS = 3 * 60
-const FORM_CONTROL_SNAPSHOT_GRACE_MS = 2 * 60 * 1000
+const FORM_CONTROL_SNAPSHOT_GRACE_MS = 30 * 1000
 
 function formLiveKey(formKey: string) {
   return `biggame_form_live:${Buffer.from(String(formKey)).toString('base64url')}`

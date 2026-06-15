@@ -115,12 +115,40 @@ export function normalizeScoringFormConfig(form: ScoringFormConfig): ScoringForm
 
 export function normalizeScoringFormState(state: ScoringFormState): ScoringFormState {
   const form = normalizeScoringFormConfig(state.form)
-  const maxRounds = form.maxRounds || state.rounds.length
+  const rawRounds = Array.isArray(state.rounds) ? state.rounds : []
+  const rawValues = Array.isArray(state.values) ? state.values : []
+  const rawRankLabels = Array.isArray(state.rankLabels) ? state.rankLabels : []
+  const maxRounds = form.maxRounds || rawRounds.length || Math.max(0, ...rawValues.map(row => Array.isArray(row) ? row.length : 0))
+  const rounds = Array.from({ length: maxRounds }, (_, index) => {
+    const rawRound = rawRounds[index] && typeof rawRounds[index] === 'object'
+      ? rawRounds[index] as Partial<ScoringFormRound>
+      : {}
+    const rawIndex = Number(rawRound.index)
+    return {
+      index: Number.isInteger(rawIndex) ? rawIndex : index,
+      label: String(rawRound.label || `Round ${index + 1}`),
+      wave: String(rawRound.wave || ''),
+      participants: String(rawRound.participants || ''),
+      confirmed: rawRound.confirmed === true,
+      locked: rawRound.locked === true,
+      saving: rawRound.saving === true,
+      error: String(rawRound.error || ''),
+      deadlineAt: String(rawRound.deadlineAt || ''),
+    }
+  })
+  const rowCount = Math.max(rawValues.length, rawRankLabels.length, form.rankCount || 0)
+  const values = Array.from({ length: rowCount }, (_, rowIndex) => {
+    const rawRow = Array.isArray(rawValues[rowIndex]) ? rawValues[rowIndex] : []
+    return Array.from({ length: maxRounds }, (_, columnIndex) => String(rawRow[columnIndex] ?? ''))
+  })
   return {
     ...state,
     form,
-    rounds: state.rounds.slice(0, maxRounds),
-    values: state.values.map(row => row.slice(0, maxRounds)),
+    title: String(state.title || form.user || ''),
+    fillToRank: Number.isFinite(Number(state.fillToRank)) ? Number(state.fillToRank) : form.defaultFillToRank,
+    rankLabels: rawRankLabels.map(label => String(label ?? '')),
+    rounds,
+    values,
   }
 }
 

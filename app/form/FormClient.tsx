@@ -75,6 +75,7 @@ const FORM_TABS = ['เช้าล่าง', 'เช้าบน', 'Games บ�
 const FORM_SESSION_STORAGE_KEY = 'biggame_form_sessions_v1'
 const FORM_LIVE_CLIENT_MAX_AGE_MS = 2 * 60 * 1000
 const FORM_FETCH_TIMEOUT_MS = 75_000
+const FORM_CONFIRMED_HOLD_MS = 25_000
 
 function isFreshLiveRound(round: FormLiveState['rounds'][string] | undefined) {
   if (!round?.updatedAt) return false
@@ -339,6 +340,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
   const submittingRoundsByForm = useRef<Record<string, Set<number>>>({})
   const dirtyMoneyDropRoundsByLiveKey = useRef<Record<string, Set<number>>>({})
   const submittingMoneyDropRoundsByLiveKey = useRef<Record<string, Set<number>>>({})
+  const recentlyConfirmedRoundsByForm = useRef<Record<string, Record<number, number>>>({})
   const stateRef = useRef<ScoringFormState | null>(null)
   const draftRef = useRef<string[][]>([])
   const fillToRankRef = useRef(3)
@@ -432,6 +434,29 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     ref.current[key]?.has(roundIndex) === true
   )
 
+  const markRecentConfirmedRound = (key: string, roundIndex: number) => {
+    if (!key || !Number.isInteger(roundIndex)) return
+    recentlyConfirmedRoundsByForm.current[key] = {
+      ...(recentlyConfirmedRoundsByForm.current[key] ?? {}),
+      [roundIndex]: Date.now(),
+    }
+  }
+
+  const clearRecentConfirmedRound = (key: string, roundIndex: number) => {
+    const existing = recentlyConfirmedRoundsByForm.current[key]
+    if (!existing) return
+    delete existing[roundIndex]
+    if (!Object.keys(existing).length) delete recentlyConfirmedRoundsByForm.current[key]
+  }
+
+  const isRecentConfirmedRound = (key: string, roundIndex: number) => {
+    const confirmedAt = recentlyConfirmedRoundsByForm.current[key]?.[roundIndex]
+    if (!confirmedAt) return false
+    if (Date.now() - confirmedAt <= FORM_CONFIRMED_HOLD_MS) return true
+    clearRecentConfirmedRound(key, roundIndex)
+    return false
+  }
+
   const invalidateFormStateRequests = useCallback((formKeys: string[]) => {
     const nextSeq = ++formStateRequestSeq.current
     formKeys.filter(Boolean).forEach(key => {
@@ -449,11 +474,21 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
   const mergeFormStateWithLocalDraft = useCallback((incoming: ScoringFormState) => {
     const formKey = incoming.form.formKey
     const protectedRounds = protectedRoundsForForm(formKey)
+    const recentConfirmedRounds = new Set<number>()
+    incoming.rounds.forEach((round, index) => {
+      if (round?.confirmed === true) {
+        clearRecentConfirmedRound(formKey, index)
+      } else if (isRecentConfirmedRound(formKey, index)) {
+        recentConfirmedRounds.add(index)
+        protectedRounds.add(index)
+      }
+    })
     if (!protectedRounds.size) return incoming
 
     protectedRounds.forEach(roundIndex => {
       const incomingRound = incoming.rounds[roundIndex]
       if (incomingRound?.confirmed === true && incomingRound.saving !== true) {
+        clearRecentConfirmedRound(formKey, roundIndex)
         clearRoundInRef(dirtyRoundsByForm, formKey, roundIndex)
         clearRoundInRef(submittingRoundsByForm, formKey, roundIndex)
         protectedRounds.delete(roundIndex)
@@ -483,12 +518,14 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
       rounds: incoming.rounds.map((round, index) => {
         if (!protectedRounds.has(index)) return round
         const submitting = isRoundInRef(submittingRoundsByForm, formKey, index)
+        const recentlyConfirmed = recentConfirmedRounds.has(index)
         return {
           ...round,
           participants: localParticipants[index] ?? localState?.rounds[index]?.participants ?? round.participants,
-          locked: submitting ? true : round.locked,
-          saving: submitting ? true : round.saving,
-          error: submitting ? '' : round.error,
+          confirmed: recentlyConfirmed ? true : round.confirmed,
+          locked: submitting ? true : recentlyConfirmed ? false : round.locked,
+          saving: submitting ? true : recentlyConfirmed ? false : round.saving,
+          error: submitting || recentlyConfirmed ? '' : round.error,
         }
       }),
     } satisfies ScoringFormState
@@ -499,11 +536,21 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     const protectedRounds = new Set<number>()
     dirtyMoneyDropRoundsByLiveKey.current[liveKey]?.forEach(index => protectedRounds.add(index))
     submittingMoneyDropRoundsByLiveKey.current[liveKey]?.forEach(index => protectedRounds.add(index))
+    const recentConfirmedRounds = new Set<number>()
+    incoming.rounds.forEach(round => {
+      if (round.confirmed === true) {
+        clearRecentConfirmedRound(liveKey, round.index)
+      } else if (isRecentConfirmedRound(liveKey, round.index)) {
+        recentConfirmedRounds.add(round.index)
+        protectedRounds.add(round.index)
+      }
+    })
     if (!protectedRounds.size) return incoming
 
     protectedRounds.forEach(roundIndex => {
       const incomingRound = incoming.rounds.find(round => round.index === roundIndex)
       if (incomingRound?.confirmed === true && incomingRound.saving !== true) {
+        clearRecentConfirmedRound(liveKey, roundIndex)
         clearRoundInRef(dirtyMoneyDropRoundsByLiveKey, liveKey, roundIndex)
         clearRoundInRef(submittingMoneyDropRoundsByLiveKey, liveKey, roundIndex)
         protectedRounds.delete(roundIndex)
@@ -523,12 +570,14 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
         if (!protectedRounds.has(round.index)) return round
         const localRound = localState?.rounds.find(item => item.index === round.index)
         const submitting = isRoundInRef(submittingMoneyDropRoundsByLiveKey, liveKey, round.index)
+        const recentlyConfirmed = recentConfirmedRounds.has(round.index)
         return {
           ...round,
           value: localDraft[round.index] ?? localRound?.value ?? round.value,
-          locked: submitting ? true : round.locked,
-          saving: submitting ? true : round.saving,
-          error: submitting ? '' : round.error,
+          confirmed: recentlyConfirmed ? true : round.confirmed,
+          locked: submitting ? true : recentlyConfirmed ? false : round.locked,
+          saving: submitting ? true : recentlyConfirmed ? false : round.saving,
+          error: submitting || recentlyConfirmed ? '' : round.error,
         }
       }),
     } satisfies MoneyDropSpecialState
@@ -541,10 +590,13 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
       const roundIndex = Number(roundKey)
       if (!Number.isInteger(roundIndex)) return
       if (liveRound.confirmed) {
+        markRecentConfirmedRound(live.formKey, roundIndex)
         clearRoundInRef(dirtyRoundsByForm, live.formKey, roundIndex)
         clearRoundInRef(submittingRoundsByForm, live.formKey, roundIndex)
       } else if (!liveRound.saving && liveRound.error) {
         clearRoundInRef(submittingRoundsByForm, live.formKey, roundIndex)
+      } else if (!liveRound.saving && !liveRound.error) {
+        clearRecentConfirmedRound(live.formKey, roundIndex)
       }
     })
     const shouldUseLiveValues = (roundIndex: number, liveRound: FormLiveState['rounds'][string] | undefined) => (
@@ -627,10 +679,13 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
       const roundIndex = Number(roundKey)
       if (!Number.isInteger(roundIndex)) return
       if (liveRound.confirmed) {
+        markRecentConfirmedRound(live.formKey, roundIndex)
         clearRoundInRef(dirtyMoneyDropRoundsByLiveKey, live.formKey, roundIndex)
         clearRoundInRef(submittingMoneyDropRoundsByLiveKey, live.formKey, roundIndex)
       } else if (!liveRound.saving && liveRound.error) {
         clearRoundInRef(submittingMoneyDropRoundsByLiveKey, live.formKey, roundIndex)
+      } else if (!liveRound.saving && !liveRound.error) {
+        clearRecentConfirmedRound(live.formKey, roundIndex)
       }
     })
     const shouldUseLiveValues = (roundIndex: number, liveRound: FormLiveState['rounds'][string] | undefined) => (
@@ -762,9 +817,11 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     if (Object.keys(mergedAcceptedStates).length) {
       statesByFormKeyRef.current = { ...statesByFormKeyRef.current, ...mergedAcceptedStates }
       setStatesByFormKey(prev => ({ ...prev, ...mergedAcceptedStates }))
+      const selectedState = formKey ? mergedAcceptedStates[formKey] : null
+      if (selectedState && stateRef.current?.form.formKey !== formKey) applyFormState(selectedState)
     }
     return mergedAcceptedStates
-  }, [formKeysForTab, mergeFormStateWithLocalDraft])
+  }, [applyFormState, formKey, formKeysForTab, mergeFormStateWithLocalDraft])
 
   const roundCountForForm = useCallback((form: ScoringFormConfig) => {
     const cached = statesByFormKey[form.formKey]

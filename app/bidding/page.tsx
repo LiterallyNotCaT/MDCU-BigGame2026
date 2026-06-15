@@ -15,7 +15,7 @@ import {
   getGameState, saveSubmission, deleteSubmissionForBaanWave, getSubmissionsForBaan,
   subscribeStore, getActiveDisasterForWave, setActiveDisaster, startCloudSync,
 } from '@/lib/store'
-import { fetchWaveInfo, fetchWaveInputs, writeToSheet, type WaveInputRow } from '@/lib/sheets'
+import { clearWaveInputsCache, fetchWaveInfo, fetchWaveInputs, writeToSheet, type WaveInputRow } from '@/lib/sheets'
 import { verifyBaanPassword, verifyPasswordSession } from '@/lib/passwords'
 
 const DISASTER_IDS = Array.from({ length: 9 }, (_, i) => i + 1)
@@ -237,6 +237,19 @@ function sheetInputToCart(row: WaveInputRow | null): CartItem[] {
   return [...islands, ...king]
 }
 
+function cartMatchesSheetInput(row: WaveInputRow | null, cart: CartItem[]) {
+  if (!row) return false
+  const normalize = (items: CartItem[]) => items
+    .filter(item => item.area && Number(item.amount) > 0)
+    .map(item => ({ area: String(item.area).trim().toUpperCase(), amount: Number(item.amount) }))
+    .sort((a, b) => a.area.localeCompare(b.area) || a.amount - b.amount)
+  const expected = normalize(cart)
+  const actual = normalize(sheetInputToCart(row))
+  return expected.length > 0
+    && expected.length === actual.length
+    && expected.every((item, index) => item.area === actual[index]?.area && item.amount === actual[index]?.amount)
+}
+
 function normalizeSheetBetTarget(value: string) {
   const match = String(value || '').match(/\d{1,2}/)
   const baan = Number(match?.[0] ?? '')
@@ -257,7 +270,8 @@ function EventGamePanel({ baan, wave, isOpen, showSolution }: { baan: number; wa
   const [message, setMessage] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const currentEventRef = useRef({ wave, showSolution })
-  const ownRank = status?.results?.find(item => item.baan === baan)?.rank ?? null
+  const ownResult = status?.results?.find(item => item.baan === baan) ?? null
+  const ownRank = ownResult?.rank ?? null
   const canSubmit = isOpen && !submitting && Boolean(answer.trim()) && !ownRank
 
   const refreshStatus = useCallback(async () => {
@@ -306,6 +320,15 @@ function EventGamePanel({ baan, wave, isOpen, showSolution }: { baan: number; wa
   useEffect(() => {
     void refreshStatus()
   }, [showSolution, refreshStatus])
+
+  useEffect(() => {
+    if (!/saving/i.test(message)) return
+    if (ownResult && !ownResult.saving) {
+      setMessage(`Correct! Rank ${ownResult.rank}`)
+      return
+    }
+    if (status && !ownResult && !submitting) setMessage('')
+  }, [message, ownResult, status, submitting])
 
   const submitAnswer = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -938,20 +961,27 @@ function BiddingGame({ baan }: { baan:number }) {
 
     const state = getGameState()
     let hasStoredDraft = readBiddingDraft(draftKey) !== null
-    const sheetHasCurrentMode = isBetMode
-      ? row?.hasBetInput === true
+    const sheetMatchesCurrentMode = isBetMode
+      ? Boolean(
+        row
+          && row.pending !== true
+          && row.hasBetInput === true
+          && normalizeSheetBetTarget(row.betTarget) === normalizeSheetBetTarget(betTarget)
+          && Number(row.betAmount) === Number(betSpend),
+      )
       : state.gamePhase === 'select-disaster'
-        ? info.kingDisaster != null
-        : row?.hasBidInput === true
-    if (sheetHasCurrentMode) {
+        ? info.kingDisaster != null && info.kingDisaster === kingDis
+        : Boolean(row && row.pending !== true && row.hasBidInput === true && cartMatchesSheetInput(row, cart))
+    if (sheetMatchesCurrentMode) {
       pendingSheetWriteUntil.current = 0
       if (hasStoredDraft && isSaved) {
         clearBiddingDraft(draftKey)
         hasStoredDraft = false
       }
     }
-    const hasLocalDraft = hasStoredDraft && Date.now() < pendingSheetWriteUntil.current
-    const mayHydrateFromSheet = !hasLocalDraft && !saveInFlight.current && isSaved && !isSyncing
+    const hasPendingSheetWrite = Date.now() < pendingSheetWriteUntil.current
+    const hasLocalDraft = hasStoredDraft && hasPendingSheetWrite
+    const mayHydrateFromSheet = !hasPendingSheetWrite && !hasLocalDraft && !saveInFlight.current && isSaved && !isSyncing
     const saveRecentlySucceeded = Date.now() - lastSuccessfulSaveAt.current < 5000
     const canAcceptSheetBlank = mayHydrateFromSheet && !saveRecentlySucceeded
 
@@ -1014,7 +1044,7 @@ function BiddingGame({ baan }: { baan:number }) {
       setSavedAt('Sheet')
       setSaveMessage('')
     }
-  }, [baan, currentSubmission, draftKey, gs.currentWave, isBetMode, isSaved, isSyncing])
+  }, [baan, betSpend, betTarget, cart, currentSubmission, draftKey, gs.currentWave, isBetMode, isSaved, isSyncing, kingDis])
 
   const fetchSheetSnapshot = useCallback(async () => {
     if (sheetSnapshotInFlight.current) return
@@ -1292,6 +1322,7 @@ function BiddingGame({ baan }: { baan:number }) {
       kingDisaster: undefined,
       islands: isBetMode ? undefined : islands,
     }
+    clearWaveInputsCache(gs.currentWave)
     writeToSheet(payload).then(res => {
       saveInFlight.current = false
       setIsSyncing(false)
@@ -1308,7 +1339,9 @@ function BiddingGame({ baan }: { baan:number }) {
       setSavedAt(timestamp)
       lastSuccessfulSaveAt.current = Date.now()
       clearBiddingDraft(draftKey)
+      clearWaveInputsCache(gs.currentWave)
       setTimeout(() => {
+        clearWaveInputsCache(gs.currentWave)
         void fetchBalance()
         void fetchSheetSnapshot()
       }, res.queued ? 2500 : 300)

@@ -47,7 +47,8 @@ type EventPendingState = {
 const EVENT_ANSWER_TTL_SECONDS = 90
 const EVENT_STATUS_TTL_SECONDS = 30
 const EVENT_PENDING_TTL_SECONDS = 5 * 60
-const EVENT_PENDING_STALE_MS = 3 * 60 * 1000
+const EVENT_PENDING_STALE_MS = 90 * 1000
+const EVENT_PENDING_EMPTY_SHEET_GRACE_MS = 25 * 1000
 
 export function normalizeEventWave(value: unknown) {
   const wave = Number(value)
@@ -196,6 +197,11 @@ function isPendingStale(answer: EventPendingAnswer) {
   return !Number.isFinite(updatedMs) || Date.now() - updatedMs > EVENT_PENDING_STALE_MS
 }
 
+function isPendingPastEmptySheetGrace(answer: EventPendingAnswer) {
+  const updatedMs = new Date(answer.updatedAt || answer.submittedAt || '').getTime()
+  return !Number.isFinite(updatedMs) || Date.now() - updatedMs > EVENT_PENDING_EMPTY_SHEET_GRACE_MS
+}
+
 function mergePendingResults(sheetResults: EventRank[], pending: EventPendingAnswer[]) {
   const safeSheet = normalizeRankList(sheetResults)
   const seen = new Set(safeSheet.map(item => item.baan))
@@ -216,12 +222,19 @@ function mergePendingResults(sheetResults: EventRank[], pending: EventPendingAns
 
 export async function mergeEventPendingIntoStatus(wave: number, status: EventSafeStatus) {
   const sheetResults = normalizeRankList(status.results)
-  const sheetBaans = new Set(sheetResults.map(item => item.baan))
+  const submittedBaans = new Set(
+    (Array.isArray(status.submitted) ? status.submitted : [])
+      .map(item => normalizeEventBaan(item?.baan))
+      .filter((baan): baan is number => baan !== null),
+  )
+  const sheetBaans = new Set([...sheetResults.map(item => item.baan), ...submittedBaans])
+  const sheetIsEmpty = sheetResults.length === 0 && submittedBaans.size === 0
   const pending = await readPendingState(wave)
   const keptAnswers: Record<string, EventPendingAnswer> = {}
   const pendingAnswers = Object.values(pending.answers).filter(answer => {
     if (sheetBaans.has(answer.baan)) return false
     if (isPendingStale(answer)) return false
+    if (sheetIsEmpty && isPendingPastEmptySheetGrace(answer)) return false
     keptAnswers[String(answer.baan)] = answer
     return true
   })
