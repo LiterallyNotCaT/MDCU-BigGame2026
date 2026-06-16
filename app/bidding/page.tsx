@@ -478,6 +478,7 @@ interface RulesVideoScreenProps {
 
 function RulesVideoScreen({ baan, timerEnd }: RulesVideoScreenProps) {
   const playerRef = useRef<any>(null)
+  const clientLagRef = useRef<number | null>(null)
   const [videoState, setVideoState] = useState<'loading' | 'playing' | 'ended'>('loading')
   const [playerState, setPlayerState] = useState<number>(-1)
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -574,10 +575,37 @@ function RulesVideoScreen({ baan, timerEnd }: RulesVideoScreenProps) {
 
     function syncVideoTime(player: any) {
       if (!timerEnd) return
-      const duration = (player.getDuration() || 720) + 60 // Video duration + 1m buffer (total 13m = 780s)
+      const videoDuration = player.getDuration() || 720 // Actual video duration (12m = 720s)
+      const buffer = 60 // 1m buffer (60s)
+      const totalDuration = videoDuration + buffer // 13m = 780s
+
       const endMs = new Date(timerEnd).getTime()
       const remainingSeconds = Math.max(0, (endMs - Date.now()) / 1000)
-      const expectedTime = Math.max(0, duration - remainingSeconds)
+      const elapsedSeconds = Math.max(0, totalDuration - remainingSeconds)
+
+      // Get or compute client-specific lag relative to the round timeline
+      let clientLag = clientLagRef.current
+      if (clientLag === null) {
+        // Retrieve cached lag from sessionStorage so refreshes do not disrupt playback position
+        const sessionKey = `rules_video_lag_${timerEnd}`
+        const cached = sessionStorage.getItem(sessionKey)
+        if (cached !== null) {
+          clientLag = parseFloat(cached)
+        } else {
+          // If they join within the buffer, they start at 0 (lag is the elapsedSeconds)
+          // If they join after the buffer, they start offset by the buffer (lag is 60s)
+          clientLag = elapsedSeconds <= buffer ? elapsedSeconds : buffer
+          try {
+            sessionStorage.setItem(sessionKey, clientLag.toString())
+          } catch (e) {
+            console.error('sessionStorage error:', e)
+          }
+        }
+        clientLagRef.current = clientLag
+      }
+
+      // The expected time for this specific client is the elapsed round time minus their join lag
+      const expectedTime = Math.max(0, elapsedSeconds - clientLag)
 
       const currentTime = player.getCurrentTime()
       if (Math.abs(currentTime - expectedTime) > 2) {
