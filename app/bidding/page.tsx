@@ -414,10 +414,13 @@ function WelcomeScreen({ baan }: { baan: number }) {
             {HOUSE_NAMES[baan]}
           </div>
         </div>
-        <button onClick={()=>{sessionStorage.removeItem('baan_login');sessionStorage.removeItem('baan_login_token');window.location.reload()}}
-          className="btn btn-ghost text-white/90 hover:text-red-300 hover:bg-white/10 flex items-center gap-1.5 font-bold">
-          <LogOut size={16} /> Logout
-        </button>
+        <div className="flex items-center gap-3">
+          <GroupChat actor={baan} />
+          <button onClick={()=>{sessionStorage.removeItem('baan_login');sessionStorage.removeItem('baan_login_token');window.location.reload()}}
+            className="btn btn-ghost text-white/90 hover:text-red-300 hover:bg-white/10 flex items-center gap-1.5 font-bold">
+            <LogOut size={16} /> Logout
+          </button>
+        </div>
       </header>
 
       <main className="welcome-rules-main flex-1 flex items-center justify-center w-full my-auto">

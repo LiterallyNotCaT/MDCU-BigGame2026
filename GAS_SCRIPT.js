@@ -1109,11 +1109,12 @@ function oauthProfileCacheKey_(email) {
 }
 
 function normalizeOAuthGameKey_(value) {
-  return String(value || '')
+  const normalized = String(value || '')
     .trim()
     .replace(/\s+[AB]$/i, '')
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '')
+  return normalized === 'missingvowel' ? 'missvowel' : normalized
 }
 
 function normalizeOAuthRole_(value) {

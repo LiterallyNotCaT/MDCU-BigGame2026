@@ -13,11 +13,12 @@ export interface OAuthFormProfile {
 }
 
 export function normalizeGameKey(value: string) {
-  return String(value || '')
+  const normalized = String(value || '')
     .trim()
     .replace(/\s+[AB]$/i, '')
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '')
+  return normalized === 'missingvowel' ? 'missvowel' : normalized
 }
 
 export function isOAuthAdmin(profile: OAuthFormProfile | null) {
