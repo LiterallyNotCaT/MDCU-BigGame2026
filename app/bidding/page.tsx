@@ -459,9 +459,12 @@ function WelcomeScreen({ baan }: { baan: number }) {
           max-width: 100vw !important;
           display: flex;
           flex-direction: column;
+          align-items: center;
         }
         .welcome-rules-main {
           padding: clamp(20px, 4vh, 40px) clamp(16px, 4vw, 36px);
+          align-self: center;
+          width: 100%;
         }
       `}</style>
     </div>
@@ -598,7 +601,7 @@ function RulesVideoScreen({ baan, timerEnd }: RulesVideoScreenProps) {
       <header className="wire-topbar flex items-center justify-between w-full">
         <div className="flex items-center gap-8">
           <HomeButton className="bg-white/10 border-white/20 text-white hover:text-white" />
-          <div className="wire-title text-white">คำอธิบายกติกา</div>
+          <div className="wire-title text-white">กติกาการเล่น</div>
           <div className="wire-title text-white flex items-center gap-3">
             {HOUSE_NAMES[baan]}
           </div>
@@ -611,9 +614,9 @@ function RulesVideoScreen({ baan, timerEnd }: RulesVideoScreenProps) {
       <main className="flex-1 flex items-center justify-center welcome-rules-main w-full max-w-4xl mx-auto my-auto">
         <div className="w-full flex flex-col items-center">
           <div className="text-center mb-6">
-            <h2 className="text-2xl font-black text-slate-950 tracking-tight mb-2">กรุณารับชมกติกาการแข่งขันอย่างตั้งใจ</h2>
+            <h2 className="text-2xl font-black text-slate-950 tracking-tight mb-2">กรุณาดูวิดีโอกติกาการแข่งขันอย่างตั้งใจ</h2>
             <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-700 text-xs font-bold shadow-sm">
-              <span>📢</span> วิดีโอนี้กำลังเล่นแบบเรียลไทม์และไม่สามารถกดข้ามได้
+              <span>📢</span> วิดีโอนี้ไม่สามารถกดข้ามได้
             </div>
           </div>
 
@@ -682,9 +685,12 @@ function RulesVideoScreen({ baan, timerEnd }: RulesVideoScreenProps) {
           max-width: 100vw !important;
           display: flex;
           flex-direction: column;
+          align-items: center;
         }
         .welcome-rules-main {
           padding: clamp(20px, 4vh, 40px) clamp(16px, 4vw, 36px);
+          align-self: center;
+          width: 100%;
         }
         #video-wrapper:fullscreen {
           width: 100vw !important;
