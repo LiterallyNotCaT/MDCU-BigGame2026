@@ -492,10 +492,13 @@ function WelcomeScreen({ baan }: { baan: number }) {
             {HOUSE_NAMES[baan]}
           </div>
         </div>
-        <button onClick={()=>{sessionStorage.removeItem('baan_login');sessionStorage.removeItem('baan_login_token');window.location.reload()}}
-          className="btn btn-ghost text-white/90 hover:text-red-300 hover:bg-white/10 flex items-center gap-1.5 font-bold">
-          <LogOut size={16} /> Logout
-        </button>
+        <div className="flex items-center gap-3">
+          <GroupChat actor={baan} />
+          <button onClick={()=>{sessionStorage.removeItem('baan_login');sessionStorage.removeItem('baan_login_token');window.location.reload()}}
+            className="btn btn-ghost text-white/90 hover:text-red-300 hover:bg-white/10 flex items-center gap-1.5 font-bold">
+            <LogOut size={16} /> Logout
+          </button>
+        </div>
       </header>
 
       <main className="welcome-rules-main flex-1 flex items-center justify-center w-full my-auto">
@@ -534,9 +537,12 @@ function WelcomeScreen({ baan }: { baan: number }) {
           max-width: 100vw !important;
           display: flex;
           flex-direction: column;
+          align-items: center;
         }
         .welcome-rules-main {
           padding: clamp(20px, 4vh, 40px) clamp(16px, 4vw, 36px);
+          align-self: center;
+          width: 100%;
         }
       `}</style>
     </div>
@@ -550,6 +556,7 @@ interface RulesVideoScreenProps {
 
 function RulesVideoScreen({ baan, timerEnd }: RulesVideoScreenProps) {
   const playerRef = useRef<any>(null)
+  const clientLagRef = useRef<number | null>(null)
   const [videoState, setVideoState] = useState<'loading' | 'playing' | 'ended'>('loading')
   const [playerState, setPlayerState] = useState<number>(-1)
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -646,10 +653,37 @@ function RulesVideoScreen({ baan, timerEnd }: RulesVideoScreenProps) {
 
     function syncVideoTime(player: any) {
       if (!timerEnd) return
-      const duration = (player.getDuration() || 720) + 60 // Video duration + 1m buffer (total 13m = 780s)
+      const videoDuration = player.getDuration() || 720 // Actual video duration (12m = 720s)
+      const buffer = 60 // 1m buffer (60s)
+      const totalDuration = videoDuration + buffer // 13m = 780s
+
       const endMs = new Date(timerEnd).getTime()
       const remainingSeconds = Math.max(0, (endMs - Date.now()) / 1000)
-      const expectedTime = Math.max(0, duration - remainingSeconds)
+      const elapsedSeconds = Math.max(0, totalDuration - remainingSeconds)
+
+      // Get or compute client-specific lag relative to the round timeline
+      let clientLag = clientLagRef.current
+      if (clientLag === null) {
+        // Retrieve cached lag from sessionStorage so refreshes do not disrupt playback position
+        const sessionKey = `rules_video_lag_${timerEnd}`
+        const cached = sessionStorage.getItem(sessionKey)
+        if (cached !== null) {
+          clientLag = parseFloat(cached)
+        } else {
+          // If they join within the buffer, they start at 0 (lag is the elapsedSeconds)
+          // If they join after the buffer, they start offset by the buffer (lag is 60s)
+          clientLag = elapsedSeconds <= buffer ? elapsedSeconds : buffer
+          try {
+            sessionStorage.setItem(sessionKey, clientLag.toString())
+          } catch (e) {
+            console.error('sessionStorage error:', e)
+          }
+        }
+        clientLagRef.current = clientLag
+      }
+
+      // The expected time for this specific client is the elapsed round time minus their join lag
+      const expectedTime = Math.max(0, elapsedSeconds - clientLag)
 
       const currentTime = player.getCurrentTime()
       if (Math.abs(currentTime - expectedTime) > 2) {
@@ -673,7 +707,7 @@ function RulesVideoScreen({ baan, timerEnd }: RulesVideoScreenProps) {
       <header className="wire-topbar flex items-center justify-between w-full">
         <div className="flex items-center gap-8">
           <HomeButton className="bg-white/10 border-white/20 text-white hover:text-white" />
-          <div className="wire-title text-white">คำอธิบายกติกา</div>
+          <div className="wire-title text-white">กติกาการเล่น</div>
           <div className="wire-title text-white flex items-center gap-3">
             {HOUSE_NAMES[baan]}
           </div>
@@ -686,9 +720,9 @@ function RulesVideoScreen({ baan, timerEnd }: RulesVideoScreenProps) {
       <main className="flex-1 flex items-center justify-center welcome-rules-main w-full max-w-4xl mx-auto my-auto">
         <div className="w-full flex flex-col items-center">
           <div className="text-center mb-6">
-            <h2 className="text-2xl font-black text-slate-950 tracking-tight mb-2">กรุณารับชมกติกาการแข่งขันอย่างตั้งใจ</h2>
+            <h2 className="text-2xl font-black text-slate-950 tracking-tight mb-2">กรุณาดูวิดีโอกติกาการแข่งขันอย่างตั้งใจ</h2>
             <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-700 text-xs font-bold shadow-sm">
-              <span>📢</span> วิดีโอนี้กำลังเล่นแบบเรียลไทม์และไม่สามารถกดข้ามได้
+              <span>📢</span> วิดีโอนี้ไม่สามารถกดข้ามได้
             </div>
           </div>
 
@@ -757,9 +791,12 @@ function RulesVideoScreen({ baan, timerEnd }: RulesVideoScreenProps) {
           max-width: 100vw !important;
           display: flex;
           flex-direction: column;
+          align-items: center;
         }
         .welcome-rules-main {
           padding: clamp(20px, 4vh, 40px) clamp(16px, 4vw, 36px);
+          align-self: center;
+          width: 100%;
         }
         #video-wrapper:fullscreen {
           width: 100vw !important;
