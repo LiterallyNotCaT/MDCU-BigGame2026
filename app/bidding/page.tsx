@@ -768,7 +768,7 @@ function RulesVideoScreen({ baan, timerEnd }: RulesVideoScreenProps) {
               <div className="absolute inset-0 z-40 bg-slate-950/90 flex flex-col items-center justify-center gap-3">
                 <div className="text-5xl animate-pulse">📢</div>
                 <p className="font-bold text-lg text-white">วิดีโอกติกาจบลงแล้ว</p>
-                <p className="text-sm text-slate-400">กรุณารอผู้ดูแลระบบเริ่มต้นเปิดการลงทุน</p>
+                <p className="text-sm text-slate-400">กรุณารอแอดมินเริ่มต้นเปิดการลงทุน</p>
               </div>
             )}
           </div>

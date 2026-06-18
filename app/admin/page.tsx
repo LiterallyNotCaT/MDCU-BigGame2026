@@ -203,12 +203,12 @@ function AdminContent() {
   }
   const selectBidMode = () => {
     setDuration(String(BID_PLAY_MINUTES))
-    applyGS({gameMode:'bid', gamePhase:'play', duration:BID_PLAY_MINUTES, showEventSolution:false})
+    applyGS({gameMode:'bid', gamePhase:'play', duration:BID_PLAY_MINUTES, isOpen:false, timerEnd:null, showEventSolution:false})
     notify('Bid game ready: 10 min island + king bid')
   }
   const selectBetMode = () => {
     setDuration(String(BET_PLAY_MINUTES))
-    applyGS({gameMode:'bet', gamePhase:'play', duration:BET_PLAY_MINUTES, showEventSolution:false})
+    applyGS({gameMode:'bet', gamePhase:'play', duration:BET_PLAY_MINUTES, isOpen:false, timerEnd:null, showEventSolution:false})
     notify('Bet game ready: 2 min')
   }
   const setEventSolutionVisible = async (visible: boolean) => {
@@ -233,7 +233,7 @@ function AdminContent() {
       return
     }
     setDuration(String(EVENT_PLAY_MINUTES))
-    applyGS({gameMode:'event', gamePhase:'play', duration:EVENT_PLAY_MINUTES, showResults:false, showEventSolution:false})
+    applyGS({gameMode:'event', gamePhase:'play', duration:EVENT_PLAY_MINUTES, isOpen:false, timerEnd:null, showResults:false, showEventSolution:false})
     void setEventSolutionVisible(false)
     notify('Event game ready: 10 min')
   }
