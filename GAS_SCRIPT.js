@@ -1211,7 +1211,7 @@ function normalizeOAuthEmail_(value) {
 }
 
 function oauthProfileCacheKey_(email) {
-  return `OAUTH_PROFILE_V2_${cacheKeyPart_(normalizeOAuthEmail_(email))}`
+  return `OAUTH_PROFILE_V3_${cacheKeyPart_(normalizeOAuthEmail_(email))}`
 }
 
 function normalizeOAuthGameKey_(value) {
@@ -1227,6 +1227,7 @@ function normalizeOAuthGameKey_(value) {
   if (normalized === 'dixit' || normalized === 'dixits') return 'dxits'
   if (normalized === 'blitz' || normalized === 'bizz') return 'biss'
   if (normalized === 'snakesandladders' || normalized === 'snakesladders') return 'snakeladder'
+  if (normalized === 'moneydrop') return 'moneydrop'
 
   return normalized
 }
@@ -1235,8 +1236,8 @@ function normalizeOAuthRole_(value) {
   const raw = String(value || '').trim()
   const compact = raw.toLowerCase().replace(/\s+/g, ' ')
   if (compact === 'admin') return 'ADMIN'
-  if (compact === 'head/prasarn') return 'Head/Prasarn'
-  if (compact === 'core team') return 'Core Team'
+  if (compact === 'head' || compact === 'prasarn' || compact === 'head/prasarn' || compact === 'head / prasarn') return 'Head/Prasarn'
+  if (compact === 'coreteam' || compact === 'core team') return 'Core Team'
   if (compact === 'staff') return 'Staff'
   if (compact === 'banned') return 'Banned'
   return 'Viewer'
@@ -1318,8 +1319,7 @@ function oauthCanEditForm_(profile, form) {
 function oauthCanViewForm_(profile, form) {
   if (!profile || !form || form.blank || profile.role === 'Banned') return false
   if (profile.isAdmin || profile.role === 'Head/Prasarn' || profile.role === 'Core Team') return true
-  if (profile.role === 'Staff') return oauthCanEditForm_(profile, form)
-  return false
+  return oauthCanEditForm_(profile, form)
 }
 
 function handleReadOAuthLogin(payload) {

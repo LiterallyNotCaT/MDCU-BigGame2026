@@ -202,6 +202,14 @@ function blankDraft(state: ScoringFormState | null) {
   return state.values.map(row => row.map(value => value || ''))
 }
 
+function sameStringArray(left: string[], right: string[]) {
+  return left.length === right.length && left.every((value, index) => value === right[index])
+}
+
+function sameStringMatrix(left: string[][], right: string[][]) {
+  return left.length === right.length && left.every((row, index) => sameStringArray(row, right[index] ?? []))
+}
+
 function defaultParticipants(text: string) {
   const parsed = parseHouseList(text)
   return parsed.length ? formatHouseList(parsed) : formatHouseList(Array.from({ length: 12 }, (_, index) => index + 1))
@@ -380,6 +388,8 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
   const [oauthLoading, setOauthLoading] = useState(true)
   const [oauthError, setOauthError] = useState('')
   const didRouteOauthProfile = useRef(false)
+  const scrollContainerRef = useRef<HTMLElement | null>(null)
+  const pendingViewportRestore = useRef<number | null>(null)
   const adminPreloadedTabs = useRef<Set<string>>(new Set())
   const liveVersionByForm = useRef<Record<string, number>>({})
   const statesByFormKeyRef = useRef<Record<string, ScoringFormState>>({})
@@ -421,23 +431,29 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
       return [{ value, label: value }]
     })
   }, [forms, tab])
-  const oauthSession: Session | null = (currentForm && oauthCanViewCurrent) || oauthIsAdmin
-    ? {
-      role: oauthIsAdmin ? 'admin' : 'staff',
-      username: oauthProfile?.nickname || oauthProfile?.email || oauthEmail,
-      password: '',
-      authMode: 'oauth',
-    }
+  const oauthIdentity = oauthProfile?.nickname || oauthProfile?.email || oauthEmail
+  const oauthAdminSession: Session | null = oauthIsAdmin
+    ? { role: 'admin', username: oauthIdentity, password: '', authMode: 'oauth' }
     : null
-  const session = currentForm ? oauthSession ?? adminSession ?? sessions[currentForm.formKey] ?? null : oauthSession ?? adminSession
-  const canSeeContent = Boolean(currentForm && (oauthCanViewCurrent || adminSession || sessions[currentForm.formKey]))
+  const oauthEditorSession: Session | null = currentForm && oauthCanEditCurrent
+    ? { role: oauthIsAdmin ? 'admin' : 'staff', username: oauthIdentity, password: '', authMode: 'oauth' }
+    : null
+  const oauthViewSession: Session | null = currentForm && oauthCanViewCurrent
+    ? { role: oauthIsAdmin ? 'admin' : 'staff', username: oauthIdentity, password: '', authMode: 'oauth' }
+    : null
+  const passwordSession = currentForm ? sessions[currentForm.formKey] ?? null : null
+  const adminSubmitSession = adminSession ?? oauthAdminSession
+  const submitSession = currentForm
+    ? adminSubmitSession ?? oauthEditorSession ?? passwordSession
+    : adminSubmitSession
+  const session = submitSession ?? oauthViewSession
+  const canSeeContent = Boolean(currentForm && (oauthCanViewCurrent || adminSession || passwordSession))
   const canLoadSelectedForm = Boolean(formKey && (oauthCanViewCurrent || adminSession || sessions[formKey]))
-  const isAdmin = session?.role === 'admin'
-  const canEditCurrentForm = Boolean(isAdmin || oauthCanEditCurrent || (currentForm && sessions[currentForm.formKey]))
+  const isAdmin = submitSession?.role === 'admin'
+  const canEditCurrentForm = Boolean(currentForm && submitSession)
   const selectedRoundMeta = currentState?.rounds[selectedRound] ?? null
   const selectedIsTimedOut = Boolean(selectedRoundMeta?.deadlineAt && Date.now() > new Date(selectedRoundMeta.deadlineAt).getTime())
-  const selectedCanEdit = Boolean(currentState && session && canEditCurrentForm && (isAdmin || (!selectedRoundMeta?.confirmed && !selectedRoundMeta?.locked && !selectedIsTimedOut)))
-
+  const selectedCanEdit = Boolean(currentState && submitSession && canEditCurrentForm && (isAdmin || (!selectedRoundMeta?.confirmed && !selectedRoundMeta?.locked && !selectedIsTimedOut)))
   const notify = (type: 'ok' | 'err' | 'warn', text: string) => {
     setNotice({ type, text })
     window.setTimeout(() => setNotice(null), 4200)
@@ -531,6 +547,46 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     clearRoundInRef(submittingRoundsByForm, key, roundIndex)
     clearRecentConfirmedRound(key, roundIndex)
   }
+
+  const restoreFormViewportAfterRender = useCallback(() => {
+    const container = scrollContainerRef.current
+    if (!container) return () => undefined
+    const scrollTop = container.scrollTop
+    const scrollLeft = container.scrollLeft
+    const activeElement = document.activeElement instanceof HTMLElement && container.contains(document.activeElement)
+      ? document.activeElement
+      : null
+    const selectionTarget = activeElement instanceof HTMLInputElement || activeElement instanceof HTMLTextAreaElement
+      ? activeElement
+      : null
+    const selectionStart = selectionTarget?.selectionStart ?? null
+    const selectionEnd = selectionTarget?.selectionEnd ?? null
+
+    return () => {
+      if (pendingViewportRestore.current) window.cancelAnimationFrame(pendingViewportRestore.current)
+      pendingViewportRestore.current = window.requestAnimationFrame(() => {
+        pendingViewportRestore.current = null
+        if (activeElement && document.contains(activeElement)) {
+          try {
+            activeElement.focus({ preventScroll: true })
+          } catch {
+            activeElement.focus()
+          }
+          if (selectionTarget && document.contains(selectionTarget) && selectionStart !== null && selectionEnd !== null) {
+            try {
+              selectionTarget.setSelectionRange(selectionStart, selectionEnd)
+            } catch {
+              // Some input types do not allow selection ranges.
+            }
+          }
+        }
+        if (document.contains(container)) {
+          container.scrollTop = scrollTop
+          container.scrollLeft = scrollLeft
+        }
+      })
+    }
+  }, [])
 
   const mergeFormStateWithLocalDraft = useCallback((incoming: ScoringFormState, options?: { trustSheetBlank?: boolean }) => {
     incoming = normalizeScoringFormState(incoming)
@@ -840,6 +896,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
   }, [])
 
   const applyFormState = useCallback((incomingState: ScoringFormState, options?: { trustSheetBlank?: boolean }) => {
+    const restoreViewport = restoreFormViewportAfterRender()
     const nextState = mergeFormStateWithLocalDraft(incomingState, options)
     const nextDraft = blankDraft(nextState)
     const nextFillToRank = clampFillToRank(nextState.fillToRank || nextState.form.defaultFillToRank)
@@ -851,13 +908,14 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     fillToRankRef.current = nextFillToRank
     participantsByRoundRef.current = nextParticipants
     setState(nextState)
-    setDraft(nextDraft)
-    setFillToRank(nextFillToRank)
-    setParticipantsByRound(nextParticipants)
+    setDraft(prev => sameStringMatrix(prev, nextDraft) ? prev : nextDraft)
+    setFillToRank(prev => prev === nextFillToRank ? prev : nextFillToRank)
+    setParticipantsByRound(prev => sameStringArray(prev, nextParticipants) ? prev : nextParticipants)
     const maxVisibleRounds = nextState.form.maxRounds || nextState.rounds.length
     setSelectedRound(prev => Math.min(prev, Math.max(0, Math.min(nextState.rounds.length, maxVisibleRounds) - 1)))
+    restoreViewport()
     return nextState
-  }, [mergeFormStateWithLocalDraft])
+  }, [mergeFormStateWithLocalDraft, restoreFormViewportAfterRender])
 
   const formKeysForTab = useCallback((tabName: string) => (
     (grouped[tabName] ?? []).filter(form => !form.blank).map(form => form.formKey)
@@ -1001,7 +1059,8 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
     }
     const uiLoadSeq = ++stateUiLoadSeq.current
     const selectedForm = forms.find(form => form.formKey === nextFormKey)
-    setLoadingState(true)
+    const hasVisibleState = stateRef.current?.form.formKey === nextFormKey
+    if (!hasVisibleState) setLoadingState(true)
     setStateLoadError('')
     try {
       if (selectedForm && options?.force === true && (adminSession || oauthProfile)) {
@@ -1098,13 +1157,19 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
 
   useEffect(() => {
     if (didRouteOauthProfile.current || oauthLoading || !oauthProfile || !forms.length) return
+    const storedTarget = formKey ? forms.find(form => form.formKey === formKey && canOAuthViewForm(oauthProfile, form)) : null
+    if (storedTarget) {
+      didRouteOauthProfile.current = true
+      setTab(storedTarget.tab)
+      return
+    }
     const editableTarget = forms.find(form => canOAuthEditForm(oauthProfile, form))
     const viewTarget = editableTarget ?? forms.find(form => canOAuthViewForm(oauthProfile, form))
     if (!viewTarget) return
     didRouteOauthProfile.current = true
     setTab(viewTarget.tab)
     setFormKey(viewTarget.formKey)
-  }, [forms, oauthLoading, oauthProfile])
+  }, [formKey, forms, oauthLoading, oauthProfile])
 
   useEffect(() => {
     if (!formKey) return
@@ -1151,15 +1216,18 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
         const res = await fetch(`/api/forms/live?formKey=${encodeURIComponent(liveFormKey)}&t=${Date.now()}`, { cache: 'no-store' })
         const data = await res.json().catch(() => null) as { ok?: boolean; live?: FormLiveState; staleSaving?: boolean } | null
         const live = data?.live
+        const previousVersion = liveVersionByForm.current[liveFormKey] ?? 0
         if (data?.ok && live && data.staleSaving) {
-          liveVersionByForm.current[liveFormKey] = Math.max(liveVersionByForm.current[liveFormKey] ?? 0, live.version ?? 0)
-          await refreshState(liveFormKey, { force: true })
+          if ((live.version ?? 0) > previousVersion) {
+            liveVersionByForm.current[liveFormKey] = Math.max(previousVersion, live.version ?? 0)
+            await refreshState(liveFormKey, { force: true, trustSheetBlank: true })
+          }
           return
         }
-        if (data?.ok && live && live.version > (liveVersionByForm.current[liveFormKey] ?? 0)) {
+        if (data?.ok && live && live.version > previousVersion) {
           const shouldRefreshSheet = hasFreshSavedSignal(live)
           applyLiveState(live)
-          if (shouldRefreshSheet) await refreshState(liveFormKey, { force: true })
+          if (shouldRefreshSheet) await refreshState(liveFormKey, { force: true, trustSheetBlank: true })
         }
       } catch {
         // Live sync is only a fast UI signal; the sheet write remains authoritative.
@@ -1372,7 +1440,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
   }
 
   const confirmMoneyDropSpecial = async (roundIndex: number) => {
-    if (!currentState || !session || !moneyDropSpecial) return
+    if (!currentState || !submitSession || !moneyDropSpecial) return
     if (moneyDropSpecialSaving.has(roundIndex) || isRoundInRef(submittingMoneyDropRoundsByLiveKey, moneyDropSpecial.liveKey, roundIndex)) return
     if (!isAdmin && !canEditCurrentForm) {
       notify('warn', 'This form is view-only for your account.')
@@ -1411,13 +1479,13 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
       return next
     })
     try {
-      const response = await fetchJson<{ queued?: boolean; message?: string }>('/api/forms/money-drop-special', {
+      const response = await fetchJson<{ queued?: boolean; confirmed?: boolean; message?: string }>('/api/forms/money-drop-special', {
         method: 'POST',
         body: JSON.stringify({
           action: 'write',
           formKey: currentState.form.formKey,
-          password: session.password,
-          oauth: session.authMode === 'oauth',
+          password: submitSession.password,
+          oauth: submitSession.authMode === 'oauth',
           admin: isAdmin,
           roundIndex,
           value,
@@ -1426,12 +1494,21 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
       if (!response.queued) {
         clearRoundInRef(dirtyMoneyDropRoundsByLiveKey, moneyDropSpecial.liveKey, roundIndex)
         clearRoundInRef(submittingMoneyDropRoundsByLiveKey, moneyDropSpecial.liveKey, roundIndex)
+        setMoneyDropSpecial(prev => {
+          if (!prev) return prev
+          const next = {
+            ...prev,
+            rounds: prev.rounds.map(item => item.index === roundIndex ? { ...item, value, confirmed: true, locked: false, saving: false, error: '' } : item),
+          }
+          moneyDropSpecialRef.current = next
+          return next
+        })
       }
       if (response.queued) {
         window.setTimeout(() => refreshMoneyDropSpecial(currentState.form.formKey), 8000)
         window.setTimeout(() => refreshMoneyDropSpecial(currentState.form.formKey), 20000)
       }
-      notify('ok', response.message || 'Sending to sheet...')
+      notify('ok', response.message || (response.queued ? 'Sending to sheet...' : 'Saved to sheet'))
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       clearRoundInRef(submittingMoneyDropRoundsByLiveKey, moneyDropSpecial.liveKey, roundIndex)
@@ -1455,7 +1532,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
   }
 
   const confirmRound = async (roundIndex: number) => {
-    if (!currentState || !session) return
+    if (!currentState || !submitSession) return
     const activeFormKey = currentState.form.formKey
     if (savingRounds.has(roundIndex) || isRoundInRef(submittingRoundsByForm, activeFormKey, roundIndex)) return
     if (!isAdmin && !canEditCurrentForm) {
@@ -1541,8 +1618,8 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
         method: 'POST',
         body: JSON.stringify({
           formKey: currentState.form.formKey,
-          password: session.password,
-          oauth: session.authMode === 'oauth',
+          password: submitSession.password,
+          oauth: submitSession.authMode === 'oauth',
           admin: isAdmin,
           roundIndex,
           fillToRank,
@@ -1552,8 +1629,8 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
       })
       if (response.queued) {
         notify('ok', response.message || 'Sending to sheet...')
-        window.setTimeout(() => refreshState(currentState.form.formKey, { force: true }), 8000)
-        window.setTimeout(() => refreshState(currentState.form.formKey, { force: true }), 20000)
+        window.setTimeout(() => refreshState(currentState.form.formKey, { force: true, trustSheetBlank: true }), 8000)
+        window.setTimeout(() => refreshState(currentState.form.formKey, { force: true, trustSheetBlank: true }), 20000)
         return
       }
       clearRoundInRef(dirtyRoundsByForm, currentState.form.formKey, roundIndex)
@@ -1842,13 +1919,19 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
       try {
         const res = await fetch(`/api/forms/live?formKey=${encodeURIComponent(liveKey)}&t=${Date.now()}`, { cache: 'no-store' })
         const data = await res.json().catch(() => null) as { ok?: boolean; live?: FormLiveState; staleSaving?: boolean } | null
-        if (data?.ok && data.live && data.staleSaving) {
-          refreshMoneyDropSpecial(currentState?.form.formKey)
+        const live = data?.live
+        const previousVersion = liveVersionByForm.current[liveKey] ?? 0
+        if (data?.ok && live && data.staleSaving) {
+          if ((live.version ?? 0) > previousVersion) {
+            liveVersionByForm.current[liveKey] = Math.max(previousVersion, live.version ?? 0)
+            refreshMoneyDropSpecial(currentState?.form.formKey)
+          }
           return
         }
-        if (data?.ok && data.live) {
-          const shouldRefreshSheet = hasFreshSavedSignal(data.live)
-          applyMoneyDropSpecialLive(data.live)
+        if (data?.ok && live && live.version > previousVersion) {
+          liveVersionByForm.current[liveKey] = Math.max(previousVersion, live.version)
+          const shouldRefreshSheet = hasFreshSavedSignal(live)
+          applyMoneyDropSpecialLive(live)
           if (shouldRefreshSheet) refreshMoneyDropSpecial(currentState?.form.formKey)
         }
       } catch {
@@ -1937,7 +2020,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
         </div>
       </header>
 
-      <main className="wire-scroll">
+      <main className="wire-scroll" ref={scrollContainerRef}>
         <div className="wire-content form-content">
           {notice && (
             <div className={clsx('form-notice', `form-notice-${notice.type}`)}>
@@ -2045,9 +2128,14 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
                   <div>
                     <h1>{currentState.title || currentState.form.user}</h1>
                   </div>
-                  <button type="button" onClick={() => refreshState(currentState.form.formKey, { force: true, trustSheetBlank: true })} className="btn btn-ghost">
-                    <RefreshCw size={14} /> Refresh
-                  </button>
+                  <div className="form-table-actions">
+                    <span className={clsx('form-access-badge', canEditCurrentForm ? 'editor' : 'view-only')}>
+                      {canEditCurrentForm ? 'Editor' : 'View only'}
+                    </span>
+                    <button type="button" onClick={() => refreshState(currentState.form.formKey, { force: true, trustSheetBlank: true })} className="btn btn-ghost">
+                      <RefreshCw size={14} /> Refresh
+                    </button>
+                  </div>
                 </div>
 
                 {isAdmin && (
@@ -2121,7 +2209,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
                         <tr key={`${label}-${rowIndex}`} className={clsx(rowIndex === effectiveSelectedAutoRow && 'auto-row')}>
                           <th>{isScoreInputForm ? (label || `บ้าน ${rowIndex + 1}`) : (label || `Rank ${rowIndex + 1}`)}</th>
                           {visibleRounds.map((round, roundIndex) => {
-                            const editable = Boolean(session && canEditCurrentForm && (isAdmin || (!round.confirmed && !round.locked && !(round.deadlineAt && Date.now() > new Date(round.deadlineAt).getTime()))))
+                            const editable = Boolean(submitSession && canEditCurrentForm && (isAdmin || (!round.confirmed && !round.locked && !(round.deadlineAt && Date.now() > new Date(round.deadlineAt).getTime()))))
                             const isAuto = usesAutoRemainder && rowIndex === fillToRank
                             const manualValues = draft.slice(0, fillToRank).map(row => row[roundIndex] ?? '')
                             const enteredHouseCount = new Set(manualValues.flatMap(value => parseHouseList(value))).size
@@ -2147,7 +2235,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
                         <tr className="form-participant-row">
                           <th>Playing</th>
                           {visibleRounds.map((round, roundIndex) => {
-                            const editable = Boolean(session && canEditCurrentForm && (isAdmin || (!round.confirmed && !round.locked && !(round.deadlineAt && Date.now() > new Date(round.deadlineAt).getTime()))))
+                            const editable = Boolean(submitSession && canEditCurrentForm && (isAdmin || (!round.confirmed && !round.locked && !(round.deadlineAt && Date.now() > new Date(round.deadlineAt).getTime()))))
                             return (
                               <td key={round.index} className={clsx(selectedRound === roundIndex && 'active-round')}>
                                 <input
@@ -2162,6 +2250,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
                         </tr>
                       )}
                     </tbody>
+                    {canEditCurrentForm && (
                     <tfoot>
                       <tr>
                         <th>Confirm</th>
@@ -2187,6 +2276,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
                         })}
                       </tr>
                     </tfoot>
+                    )}
                   </table>
                 </div>
                 {isScoreNumberForm && (
@@ -2237,18 +2327,17 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
                             <th>Input</th>
                             {moneyDropSpecialRounds.map(round => {
                               const isSending = moneyDropSpecialSaving.has(round.index) || round.saving === true
-                              const editable = Boolean(session && canEditCurrentForm && (isAdmin || (!round.confirmed && !round.locked && !isSending)))
+                              const editable = Boolean(submitSession && canEditCurrentForm && (isAdmin || (!round.confirmed && !round.locked && !isSending)))
                               return (
                                 <td key={round.index}>
                                   {round.index === 0 ? (
-                                    <textarea
+                                    <input
                                       className="moneydrop-special-islands-input"
                                       value={moneyDropSpecialDraft[round.index] ?? ''}
                                       onChange={event => updateMoneyDropSpecialDraft(round.index, event.target.value)}
                                       onBlur={event => updateMoneyDropSpecialDraft(round.index, normalizeMoneyDropSpecialIslandText(event.target.value))}
                                       disabled={!editable}
                                       placeholder="A1, A2, B4, C5"
-                                      rows={2}
                                     />
                                   ) : (
                                     <input
@@ -2265,6 +2354,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
                             })}
                           </tr>
                         </tbody>
+                        {canEditCurrentForm && (
                         <tfoot>
                           <tr>
                             <th>Confirm</th>
@@ -2282,6 +2372,7 @@ export default function FormClient({ oauthEmail }: { oauthEmail: string }) {
                             })}
                           </tr>
                         </tfoot>
+                        )}
                       </table>
                     </div>
                   </div>

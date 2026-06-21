@@ -5,7 +5,7 @@ import { redisGetJson, redisSetJsonWithTtl } from './redisStore'
 const OAUTH_PROFILE_CACHE_SECONDS = 30
 
 function oauthProfileCacheKey(email: string) {
-  return `biggame_oauth_profile:${Buffer.from(email.trim().toLowerCase()).toString('base64url')}`
+  return `biggame_oauth_profile_v2:${Buffer.from(email.trim().toLowerCase()).toString('base64url')}`
 }
 
 export async function readOAuthProfile(email: string) {

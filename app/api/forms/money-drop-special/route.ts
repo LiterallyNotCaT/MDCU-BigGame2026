@@ -1,4 +1,4 @@
-import { after, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import { auth, isAllowedDocChulaEmail } from '@/auth'
 import {
   claimAndPublishFormRoundSubmit,
@@ -40,6 +40,12 @@ function specialLiveKey(formKey: string) {
 
 function jsonError(message: string, status = 500) {
   return NextResponse.json({ ok: false, message }, { status })
+}
+
+function statusForWriteError(message: string) {
+  if (/unauthorized/i.test(message)) return 401
+  if (/already confirmation|already confirmed|already sending/i.test(message)) return 409
+  return /busy|retry|lock|timeout|timed out/i.test(message) ? 503 : 400
 }
 
 function normalizeIslandList(value: unknown) {
@@ -195,9 +201,7 @@ export async function POST(req: Request) {
     if (action !== 'write') return jsonError('Unknown action', 400)
 
     const roundIndex = Number(payload.roundIndex)
-    if (!Number.isInteger(roundIndex) || roundIndex < 0 || roundIndex > 1) {
-      return jsonError('Invalid round', 400)
-    }
+    if (!Number.isInteger(roundIndex) || roundIndex < 0 || roundIndex > 1) return jsonError('Invalid round', 400)
 
     const value = normalizeValue(roundIndex, payload.value)
     if (!value) {
@@ -207,6 +211,7 @@ export async function POST(req: Request) {
     const liveKey = specialLiveKey(formKey)
     const isAdmin = payload.admin === true
     let claimed = false
+
     try {
       await claimAndPublishFormRoundSubmit(liveKey, roundIndex, isAdmin, {
         locked: true,
@@ -215,83 +220,57 @@ export async function POST(req: Request) {
         values: [value],
       })
       claimed = true
+
+      let email = ''
+      if (payload.oauth === true) {
+        const session = await auth()
+        email = session?.user?.email ?? ''
+        if (!session?.user || !isAllowedDocChulaEmail(email)) throw new Error('Unauthorized')
+      }
+
+      const data = await callGas<{ status: string; message?: string; roundIndex?: number; value?: string }>({
+        action: payload.oauth === true ? 'writeMoneyDropSpecialOAuth' : 'writeMoneyDropSpecial',
+        formKey,
+        password: payload.password ?? '',
+        oauth: payload.oauth === true,
+        admin: payload.admin === true,
+        email,
+        roundIndex,
+        value,
+      })
+
+      await publishFormRoundSavedSignal(liveKey, roundIndex, {
+        confirmed: true,
+        locked: false,
+      })
+
+      return NextResponse.json({
+        ok: true,
+        confirmed: true,
+        message: data.message || 'Saved to sheet',
+        roundIndex,
+        value,
+      }, {
+        headers: { 'Cache-Control': 'no-store' },
+      })
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      if (message === FORM_SUBMIT_IN_PROGRESS_MESSAGE) {
-        return NextResponse.json({ ok: true, queued: true, message: 'Sending to sheet...' }, {
-          headers: { 'Cache-Control': 'no-store' },
-        })
-      }
-      return jsonError(message, 409)
-    }
+      const rawMessage = error instanceof Error ? error.message : String(error)
+      const message = rawMessage === FORM_SUBMIT_IN_PROGRESS_MESSAGE
+        ? 'This input is already sending. Please wait.'
+        : rawMessage
 
-    let email = ''
-    if (payload.oauth === true) {
-      const session = await auth()
-      email = session?.user?.email ?? ''
-      if (!session?.user || !isAllowedDocChulaEmail(email)) {
-        if (claimed) await releaseFormRoundSubmitClaim(liveKey, roundIndex)
-        return jsonError('Unauthorized', 401)
+      if (claimed) {
+        await releaseFormRoundSubmitClaim(liveKey, roundIndex).catch(() => undefined)
+        await publishFormRoundPatch(liveKey, [{
+          index: roundIndex,
+          locked: false,
+          saving: false,
+          error: message,
+        }]).catch(() => undefined)
       }
+      return jsonError(message, statusForWriteError(message))
     }
-
-    after(() => persistMoneyDropSpecial({ payload, formKey, liveKey, roundIndex, value, email }))
-    return NextResponse.json({ ok: true, queued: true, message: 'Sending to sheet...' }, {
-      headers: { 'Cache-Control': 'no-store' },
-    })
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : String(error))
-  }
-}
-
-async function persistMoneyDropSpecial({
-  payload,
-  formKey,
-  liveKey,
-  roundIndex,
-  value,
-  email,
-}: {
-  payload: Record<string, unknown>
-  formKey: string
-  liveKey: string
-  roundIndex: number
-  value: string
-  email: string
-}) {
-  let keepClaimForSheetVerification = false
-  try {
-    await callGas({
-      action: payload.oauth === true ? 'writeMoneyDropSpecialOAuth' : 'writeMoneyDropSpecial',
-      formKey,
-      password: payload.password ?? '',
-      oauth: payload.oauth === true,
-      admin: payload.admin === true,
-      email,
-      roundIndex,
-      value,
-    })
-    await publishFormRoundSavedSignal(liveKey, roundIndex, {
-      confirmed: true,
-      locked: false,
-    })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    if (/timed out/i.test(message)) {
-      keepClaimForSheetVerification = true
-      console.error('Money Drop special write timed out; leaving live state for sheet verification:', message)
-      return
-    }
-    await releaseFormRoundSubmitClaim(liveKey, roundIndex).catch(() => undefined)
-    await publishFormRoundPatch(liveKey, [{
-      index: roundIndex,
-      locked: false,
-      saving: false,
-      error: message,
-    }]).catch(() => undefined)
-  } finally {
-    if (!keepClaimForSheetVerification) {
-      await releaseFormRoundSubmitClaim(liveKey, roundIndex).catch(() => undefined)
-    }
   }
 }
