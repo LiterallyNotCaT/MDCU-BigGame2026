@@ -939,16 +939,20 @@ function writeFormScoreForUser_(form, payload, username) {
     if (roundIndex >= maxRounds) return { status: 'error', message: 'Round not found' }
     const now = new Date()
 
+    const col = formValueStartColumn_(form) + roundIndex
+    const columnValues = sheet.getRange(4, col, 12, 1).getValues()
+    const columnBlank = columnValues.every(r => !String(r[0] || '').trim())
+
     const control = readFormControl_(form.formKey)
     const existingRoundControl = control.rounds && control.rounds[String(roundIndex)] || {}
     if (payload.admin !== true) {
-      if (existingRoundControl.confirmed === true) {
+      if (!columnBlank && existingRoundControl.confirmed === true) {
         return { status: 'error', message: "Can't send the data as there is already confirmation from another person." }
       }
-      if (existingRoundControl.locked === true) {
+      if (!columnBlank && existingRoundControl.locked === true) {
         return { status: 'error', message: 'This round is locked' }
       }
-      if (existingRoundControl.deadlineAt) {
+      if (!columnBlank && existingRoundControl.deadlineAt) {
         const deadlineMs = new Date(existingRoundControl.deadlineAt).getTime()
         if (isFinite(deadlineMs) && Date.now() > deadlineMs) {
           return { status: 'error', message: 'This round is timed out' }
@@ -959,7 +963,6 @@ function writeFormScoreForUser_(form, payload, username) {
     const fillToRank = clampFormFill_(payload.fillToRank, form.defaultFillToRank)
     const participantsText = defaultParticipants_(payload.participants)
     const values = buildFormColumnValues_(form, payload.values || [], fillToRank, participantsText)
-    const col = formValueStartColumn_(form) + roundIndex
 
     sheet.getRange(4, col, values.length, 1).setValues(values.map(value => [value]))
     if (values.length < 12) sheet.getRange(4 + values.length, col, 12 - values.length, 1).clearContent()

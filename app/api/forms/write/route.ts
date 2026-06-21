@@ -106,6 +106,7 @@ async function persistFormWrite({ payload, values, email }: { payload: Record<st
     }
     await publishConfirmedRound(payload, values)
   } catch (error) {
+    console.error('Form background write failed:', error)
     const message = error instanceof Error ? error.message : String(error)
     const formKey = String(payload.formKey || '')
     const roundIndex = Number(payload.roundIndex)
