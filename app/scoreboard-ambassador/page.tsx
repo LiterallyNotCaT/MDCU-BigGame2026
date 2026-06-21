@@ -50,7 +50,6 @@ function AmbassadorContent() {
     }
     : ambassadorVisibility
   const visibleTabs = TAB_META.filter(item => effectiveVisibility.tabs[item.key])
-  const canSeeFullInfo = kingProUnlocked || gs.showResults === true
 
   useEffect(()=>{
     if (!isLoaded) return
@@ -222,13 +221,13 @@ function AmbassadorContent() {
                         </button>
                       ))}
                     </div>
-                    <GameMap ownership={canSeeFullInfo ? sheetOwnership.ownership : {}}
-                      disasterOwnership={canSeeFullInfo ? sheetOwnership.disasterOwnership : {}}
-                      eradicatedOwnership={canSeeFullInfo ? sheetOwnership.eradicatedOwnership : {}}
+                    <GameMap ownership={sheetOwnership.ownership}
+                      disasterOwnership={sheetOwnership.disasterOwnership}
+                      eradicatedOwnership={sheetOwnership.eradicatedOwnership}
                       filterDisaster={filterDis} readOnly
-                      kingDisaster={canSeeFullInfo ? getActiveDisasterForWave(selWave) : null}
-                      currentKing={canSeeFullInfo ? currentKing : null}
-                      kingOwner={canSeeFullInfo ? kingOwner : null}
+                      kingDisaster={getActiveDisasterForWave(selWave)}
+                      currentKing={currentKing}
+                      kingOwner={kingOwner}
                       mode={gs.mapMode}
                       compact />
                     <div className="ambassador-filter-row flex flex-wrap gap-2">
